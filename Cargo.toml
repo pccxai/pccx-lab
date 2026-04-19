@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "src/core",
+    "src/uvm_bridge",
+    "src/ai_copilot"
+]
+resolver = "2"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+anyhow = "1.0"
