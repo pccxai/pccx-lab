@@ -143,7 +143,7 @@ pub fn merge_jsonl(paths: &[&Path]) -> Result<MergedCoverage, CoverageError> {
 /*────────────────────────────────────────*/
 
 #[cfg(test)]
-mod tests {
+mod merge {
     use super::*;
     use std::io::Write;
 

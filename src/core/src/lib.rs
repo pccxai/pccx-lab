@@ -15,6 +15,7 @@ pub mod synth_report;
 pub mod roofline;
 pub mod report;
 pub mod bottleneck;
+pub mod coverage;
 
 // ─── Convenience re-exports (public API surface) ──────────────────────────────
 pub use pccx_format::{PccxFile, PccxHeader, PccxError, ArchConfig, TraceConfig, PayloadConfig, fnv1a_64};
@@ -30,3 +31,4 @@ pub use synth_report::{SynthReport, UtilSummary, TimingSummary, load_from_files}
 pub use roofline::{RooflinePoint, analyze as analyze_roofline};
 pub use report::render_markdown;
 pub use bottleneck::{detect as detect_bottlenecks, BottleneckInterval, BottleneckKind, DetectorConfig};
+pub use coverage::{merge_jsonl as merge_coverage_jsonl, CovBin, CovGroup, CrossTuple, MergedCoverage, CoverageError};
