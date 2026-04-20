@@ -42,7 +42,7 @@
 
 ## JSON 헤더 필드
 
-```jsonc
+```json
 {
   "pccx_lab_version": "v0.4.0-contention-aware",   // 문자열
   "format_minor": 1,                                 // u8

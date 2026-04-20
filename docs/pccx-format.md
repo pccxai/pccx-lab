@@ -43,7 +43,7 @@ All multi-byte integers are **little-endian** unless otherwise noted.
 
 ## JSON Header Fields
 
-```jsonc
+```json
 {
   "pccx_lab_version": "v0.4.0-contention-aware",   // string
   "format_minor": 1,                                 // u8
