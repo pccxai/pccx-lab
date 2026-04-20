@@ -143,6 +143,7 @@ struct TbResult {
     name: String,
     verdict: String,
     cycles: u64,
+    pccx_path: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -159,6 +160,7 @@ struct VerificationSummary {
 #[tauri::command]
 async fn run_verification(repo_path: String) -> Result<VerificationSummary, String> {
     let script = format!("{}/hw/sim/run_verification.sh", repo_path);
+    let repo_path_arg = repo_path.clone();
 
     let output = tokio::task::spawn_blocking(move || {
         std::process::Command::new("bash").arg(&script).output()
@@ -201,10 +203,17 @@ async fn run_verification(repo_path: String) -> Result<VerificationSummary, Stri
             .next()
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(0);
+        let candidate = format!("{}/hw/sim/work/{}/{}.pccx", repo_path_arg, name, name);
+        let pccx_path = if std::path::Path::new(&candidate).is_file() {
+            Some(candidate)
+        } else {
+            None
+        };
         testbenches.push(TbResult {
             name: name.to_string(),
             verdict: verdict.to_string(),
             cycles,
+            pccx_path,
         });
     }
 

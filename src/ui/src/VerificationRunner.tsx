@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useTheme } from "./ThemeContext";
-import { PlayCircle, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { PlayCircle, CheckCircle2, XCircle, Loader2, ExternalLink } from "lucide-react";
 
 interface TbResult {
   name: string;
   verdict: "PASS" | "FAIL";
   cycles: number;
+  pccx_path: string | null;
 }
 
 interface VerificationSummary {
@@ -42,6 +43,7 @@ function tauriInvoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> 
 export function VerificationRunner({ repoPath }: Props) {
   const theme = useTheme();
   const [state, setState] = useState<RunState>({ kind: "idle" });
+  const [lastOpened, setLastOpened] = useState<string | null>(null);
 
   const run = async () => {
     setState({ kind: "running" });
@@ -52,6 +54,15 @@ export function VerificationRunner({ repoPath }: Props) {
       setState({ kind: "ok", summary });
     } catch (err) {
       setState({ kind: "error", message: String(err) });
+    }
+  };
+
+  const openInTimeline = async (path: string) => {
+    try {
+      await tauriInvoke("load_pccx", { path });
+      setLastOpened(path);
+    } catch (err) {
+      console.error("load_pccx failed", err);
     }
   };
 
@@ -146,6 +157,7 @@ export function VerificationRunner({ repoPath }: Props) {
                 <th className="p-1 text-left">Testbench</th>
                 <th className="p-1 text-right">Cycles</th>
                 <th className="p-1 text-center">Status</th>
+                <th className="p-1 text-center">Trace</th>
               </tr>
             </thead>
             <tbody>
@@ -163,6 +175,26 @@ export function VerificationRunner({ repoPath }: Props) {
                     >
                       {tb.verdict}
                     </span>
+                  </td>
+                  <td className="p-1 text-center">
+                    {tb.pccx_path ? (
+                      <button
+                        onClick={() => openInTimeline(tb.pccx_path!)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
+                        style={{
+                          color: lastOpened === tb.pccx_path ? theme.success : theme.accent,
+                          border: `1px solid ${lastOpened === tb.pccx_path ? theme.success : theme.accent}`,
+                          background: "transparent",
+                          cursor: "pointer",
+                        }}
+                        title={`Load ${tb.pccx_path} into Timeline`}
+                      >
+                        <ExternalLink size={10} />
+                        {lastOpened === tb.pccx_path ? "Loaded" : "Open"}
+                      </button>
+                    ) : (
+                      <span style={{ color: theme.textMuted }}>—</span>
+                    )}
                   </td>
                 </tr>
               ))}
