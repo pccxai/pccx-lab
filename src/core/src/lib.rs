@@ -14,6 +14,7 @@ pub mod cycle_estimator;
 pub mod synth_report;
 pub mod roofline;
 pub mod report;
+pub mod bottleneck;
 
 // ─── Convenience re-exports (public API surface) ──────────────────────────────
 pub use pccx_format::{PccxFile, PccxHeader, PccxError, ArchConfig, TraceConfig, PayloadConfig, fnv1a_64};
@@ -28,3 +29,4 @@ pub use cycle_estimator::{CycleEstimator, TileOperation};
 pub use synth_report::{SynthReport, UtilSummary, TimingSummary, load_from_files};
 pub use roofline::{RooflinePoint, analyze as analyze_roofline};
 pub use report::render_markdown;
+pub use bottleneck::{detect as detect_bottlenecks, BottleneckInterval, BottleneckKind, DetectorConfig};
