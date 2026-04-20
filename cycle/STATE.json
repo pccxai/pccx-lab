@@ -1,1 +1,1 @@
-{ "round": 2, "phase": "research", "prev_round_impl": ["T-1", "T-2", "T-3"], "prev_round_grade": "C-", "r2_grade": "C" }
+{ "round": 2, "phase": "plan", "prev_round_impl": ["T-1", "T-2", "T-3"], "prev_round_grade": "C-", "r2_grade": "C", "max_rounds": 50, "heartbeat_every": 10 }

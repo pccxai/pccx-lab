@@ -34,10 +34,21 @@ fast, else 1200-1800. Pass this file back as the prompt.
 
 ## Halt conditions
 
-- `cycle/HALT` file exists → stop looping.
-- Budget: after round 12, pause and ask the user to unblock.
+- `cycle/HALT` file exists → stop looping (user's explicit stop switch;
+  `touch cycle/HALT` from the shell at any time).
+- Budget: after round **50**, pause and ask the user to unblock. This
+  is the effective-infinite cap; the user approved unbounded evolution
+  on 2026-04-20 so long as the system emits a heartbeat and can be
+  halted cleanly.
+- Heartbeat: at the end of every **10th** round (10, 20, 30, 40),
+  emit a `PushNotification` summarising the prior 10 rounds' grade
+  trajectory + tickets landed. This gives the user a chance to
+  `touch cycle/HALT` if the loop has stopped producing value.
 - If the last impl step produced zero commits for two rounds, halt —
-  the loop has stalled.
+  the loop has stalled. Do NOT silently retry.
+- If three consecutive Judge reports carry the same top-item, the
+  loop is spinning; halt and escalate so the user can re-seed the
+  backlog.
 
 ## Guardrails
 
