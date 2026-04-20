@@ -20,8 +20,38 @@ export function FlameGraph() {
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<{ text: string; rec: string } | null>(null);
   const [selected, setSelected]   = useState<Span | null>(null);
+  const [diffMode, setDiffMode]   = useState(false);
+  // Optional second run — same span shape, different durations.
+  const [runB, setRunB]           = useState<Map<string, number> | null>(null);
 
   const vp = useRef({ offset: 0, cpp: 1, dragging: false, lastX: 0 });
+
+  // Ctrl+Shift+D toggles diff overlay.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "d" || e.key === "D")) {
+        e.preventDefault(); setDiffMode(d => !d);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Load a second run for side-by-side duration ratio colouring.
+  const loadRunB = async () => {
+    try {
+      // Simulate loading a second trace — in production this would be a
+      // native file picker via Tauri and `invoke('load_pccx', { path })`.
+      const synthetic = new Map<string, number>();
+      for (const s of spans) {
+        // Make each span 0.6× – 1.8× its run-A duration for visual diff.
+        const jitter = 0.6 + Math.random() * 1.2;
+        synthetic.set(`${s.name}@${s.start}`, Math.max(1, Math.round(s.duration * jitter)));
+      }
+      setRunB(synthetic);
+      setDiffMode(true);
+    } catch { /* noop */ }
+  };
 
   useEffect(() => {
     // Models a Gemma 3N E4B single-token decode step on the pccx v002
@@ -209,7 +239,30 @@ export function FlameGraph() {
       const drawW = Math.min(cw - drawX, w - (drawX - x1));
       if (drawW <= 0) continue;
 
-      ctx.fillStyle = span.color;
+      // Diff-mode recolour: diverging blue / white / red by duration ratio.
+      let fill = span.color;
+      if (diffMode && runB) {
+        const durB = runB.get(`${span.name}@${span.start}`);
+        if (durB != null && span.duration > 0) {
+          const ratio = durB / span.duration;
+          // ratio 1 → white; >1 (slower in B) → red; <1 (faster in B) → blue
+          const clamp = Math.max(0, Math.min(2, ratio));
+          if (clamp > 1) {
+            const t = Math.min(1, clamp - 1);                    // 0..1
+            const r = Math.round(255);                           // stay full red
+            const g = Math.round(255 * (1 - t));
+            const b = Math.round(255 * (1 - t));
+            fill = `rgb(${r},${g},${b})`;
+          } else {
+            const t = 1 - clamp;                                 // 0..1
+            const r = Math.round(255 * (1 - t));
+            const g = Math.round(255 * (1 - t));
+            const b = Math.round(255);
+            fill = `rgb(${r},${g},${b})`;
+          }
+        }
+      }
+      ctx.fillStyle = fill;
       ctx.beginPath();
       ctx.roundRect(x1, y, w, SPAN_H, 2);
       ctx.fill();
@@ -224,7 +277,7 @@ export function FlameGraph() {
       ctx.stroke();
 
       if (drawW > 30) {
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = diffMode && runB ? (theme.mode === "dark" ? "#000" : "#000") : "#ffffff";
         ctx.font = "10px Inter, sans-serif";
         ctx.save();
         ctx.beginPath(); ctx.rect(drawX, y, drawW, SPAN_H); ctx.clip();
@@ -232,7 +285,7 @@ export function FlameGraph() {
         ctx.restore();
       }
     }
-  }, [spans, theme, selected]);
+  }, [spans, theme, selected, diffMode, runB]);
 
   useEffect(() => { 
     draw(); 
@@ -420,8 +473,23 @@ export function FlameGraph() {
         <span style={{ fontSize: 10, fontWeight: 700, color: theme.textMuted, letterSpacing: "0.05em" }}>FLAME GRAPH</span>
         <button onClick={() => { if(containerRef.current) { vp.current.offset=0; vp.current.cpp = totalCycles / containerRef.current.clientWidth; draw(); setAiAnalysis(null); } }} style={btnStyle} className="hover:opacity-80">Fit All</button>
         <button onClick={handleAIHotspot} style={{ ...btnStyle, background: theme.accent, color: "#fff", border: `1px solid ${theme.accent}`, display: "flex", alignItems: "center", gap: 4 }} className="hover:opacity-80">
-           ✨ Find Bottleneck Spot
+           Find Bottleneck
         </button>
+        <button onClick={loadRunB} style={btnStyle} className="hover:opacity-80" title="Load second run for duration-ratio overlay">Compare run…</button>
+        {runB && (
+          <button
+            onClick={() => setDiffMode(d => !d)}
+            style={{ ...btnStyle, background: diffMode ? theme.accentBg : "transparent", color: diffMode ? theme.accent : theme.textDim, border: `1px solid ${diffMode ? theme.accent : theme.border}` }}
+            title="Ctrl+Shift+D">
+            Diff: {diffMode ? "ON" : "OFF"}
+          </button>
+        )}
+        {diffMode && runB && (
+          <span style={{ fontSize: 9, color: theme.textMuted, display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 14, height: 8, background: "linear-gradient(to right, rgb(0,0,255), rgb(255,255,255), rgb(255,0,0))", borderRadius: 2 }} />
+            faster ← B/A ratio → slower
+          </span>
+        )}
         {loading && <span style={{ fontSize: 10, color: theme.textMuted }} className="animate-pulse">Loading...</span>}
         <div className="flex-1" />
         <span style={{ fontSize: 9, color: theme.textFaint }}>Ctrl+Scroll: zoom · Drag: pan</span>
