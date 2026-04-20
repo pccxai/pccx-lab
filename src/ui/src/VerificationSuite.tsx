@@ -3,6 +3,7 @@ import { useTheme } from "./ThemeContext";
 import { CheckCircle, AlertOctagon, TerminalSquare, ShieldCheck, Bug, Activity, Cpu } from "lucide-react";
 import { SynthStatusCard } from "./SynthStatusCard";
 import { VerificationRunner } from "./VerificationRunner";
+import { RooflineCard } from "./RooflineCard";
 
 type VerifyTab = "isa" | "api" | "uvm" | "synth";
 
@@ -172,6 +173,7 @@ export function VerificationSuite() {
                 utilizationPath={DEFAULT_UTIL_PATH}
                 timingPath={DEFAULT_TIMING_PATH}
               />
+              <RooflineCard />
               <p className="text-[11px] mt-1" style={{ color: theme.textMuted }}>
                 Paths are relative to the <code>pccx-lab</code> binary's working directory.
                 Override via props when embedding this widget elsewhere.

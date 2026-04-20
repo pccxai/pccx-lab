@@ -142,6 +142,37 @@ fn analyze_roofline(state: State<'_, AppState>) -> Result<RooflinePoint, String>
     Ok(analyze_roofline_fn(trace, &hw))
 }
 
+/// Renders a Markdown report that summarises the currently-cached trace
+/// (with the roofline point computed on the fly) and — when paths are
+/// provided — the Vivado synth utilisation + timing state.
+///
+/// Each section is optional: pass empty strings to omit the synth
+/// section, and the command will only fail if both trace and paths are
+/// absent simultaneously.
+#[tauri::command]
+fn generate_markdown_report(
+    utilization_path: String,
+    timing_path: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let trace_guard = state.trace.lock().unwrap();
+    let trace_opt   = trace_guard.as_ref();
+    let synth_opt = if !utilization_path.is_empty() && !timing_path.is_empty() {
+        match pccx_core::synth_report::load_from_files(&utilization_path, &timing_path) {
+            Ok(r) => Some(r),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    if trace_opt.is_none() && synth_opt.is_none() {
+        return Err("Need at least a loaded trace or a synth-report path pair".into());
+    }
+
+    Ok(pccx_core::render_markdown(trace_opt, synth_opt.as_ref()))
+}
+
 /// Enumerates every UVM strategy the ai_copilot's sequence generator accepts.
 /// The UI uses this to populate a dropdown so users never type invalid names.
 #[tauri::command]
@@ -457,6 +488,7 @@ pub fn run() {
             list_pccx_traces,
             analyze_roofline,
             list_uvm_strategies,
+            generate_markdown_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
