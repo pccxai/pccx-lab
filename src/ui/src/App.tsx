@@ -23,6 +23,8 @@ import { WaveformViewer }    from "./WaveformViewer";
 import { VerificationSuite } from "./VerificationSuite";
 import { Roofline }          from "./Roofline";
 import { BottomPanel }       from "./BottomPanel";
+import { ScenarioFlow }      from "./ScenarioFlow";
+import { TestbenchAuthor }   from "./TestbenchAuthor";
 
 import { Badge, Button, Flex, TextField } from "@radix-ui/themes";
 import {
@@ -34,11 +36,12 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ActiveTab = "timeline" | "flamegraph" | "hardware" | "memory" | "waves" | "nodes" | "canvas" | "code" | "report" | "extensions" | "verify" | "roofline";
+type ActiveTab = "timeline" | "flamegraph" | "hardware" | "memory" | "waves" | "nodes" | "canvas" | "code" | "report" | "extensions" | "verify" | "roofline" | "scenario" | "tb_author";
 
 interface ChatMessage { role: "system" | "user" | "ai"; content: string; }
 
 const TABS: { id: ActiveTab; label: string; icon: React.ReactNode }[] = [
+  { id: "scenario",   label: "Scenario Flow",    icon: <Zap size={12} />             },
   { id: "timeline",   label: "Timeline",         icon: <Clock size={12} />           },
   { id: "flamegraph", label: "Flame Graph",      icon: <Layers size={12} />          },
   { id: "waves",      label: "Waveform",         icon: <ActivitySquare size={12} />  },
@@ -46,6 +49,7 @@ const TABS: { id: ActiveTab; label: string; icon: React.ReactNode }[] = [
   { id: "memory",     label: "Memory Dump",      icon: <Database size={12} />        },
   { id: "nodes",      label: "Data Flow",        icon: <Activity size={12} />        },
   { id: "code",       label: "SV Editor",        icon: <Code2 size={12} />           },
+  { id: "tb_author",  label: "TB Author",        icon: <LayoutDashboard size={12} /> },
   { id: "report",     label: "Report",           icon: <FileText size={12} />        },
   { id: "canvas",     label: "3D View",          icon: <Box size={12} />             },
   { id: "extensions", label: "Extensions",       icon: <Settings2 size={12} />       },
@@ -369,6 +373,8 @@ function AppInner() {
                     {activeTab === "extensions" && <ExtensionManager />}
                     {activeTab === "verify"     && <VerificationSuite />}
                     {activeTab === "roofline"   && <Roofline />}
+                    {activeTab === "scenario"   && <ScenarioFlow />}
+                    {activeTab === "tb_author"  && <TestbenchAuthor />}
                   </div>
                 </div>
               </Panel>
