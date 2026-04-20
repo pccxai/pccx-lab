@@ -1,1 +1,1 @@
-{ "round": 2, "phase": "plan", "prev_round_impl": ["T-1", "T-2", "T-3"], "prev_round_grade": "C-", "r2_grade": "C", "max_rounds": 50, "heartbeat_every": 10 }
+{ "round": 2, "phase": "impl", "impl_tickets_inflight": ["T-1", "T-2", "T-3"], "prev_round_impl": ["T-1", "T-2", "T-3"], "prev_round_grade": "C-", "r2_grade": "C", "max_rounds": 50, "heartbeat_every": 10 }
