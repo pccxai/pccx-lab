@@ -27,7 +27,7 @@ export function ReportGenerator() {
         </button>
       </Dialog.Trigger>
       <Dialog.Content style={{ maxWidth: 450, backgroundColor: "#111827", color: "#f3f4f6", border: "1px solid #374151" }}>
-        <Dialog.Title>Generate Enterprise Report</Dialog.Title>
+        <Dialog.Title>Generate Report</Dialog.Title>
         <Dialog.Description size="2" mb="4" color="gray">
           Compile the current 32K 3D trace snapshots, node layouts, and AI Copilot analysis into a professional PDF report.
         </Dialog.Description>

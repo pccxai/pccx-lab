@@ -23,42 +23,148 @@ export function FlameGraph() {
   const vp = useRef({ offset: 0, cpp: 1, dragging: false, lastX: 0 });
 
   useEffect(() => {
-    // Generate dummy flame graph data for NPU layers
-    const demoSpans: Span[] = [];
-    const layers = ["Conv2D_0", "Depthwise_1", "Add_2", "Conv2D_3", "Softmax_4"];
-    const colors = ["#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e", "#10b981", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef"];
-    
-    let t = 0;
-    
-    // Root span
-    const rootDur = 120000;
-    demoSpans.push({ name: "Forward_Pass", start: 0, duration: rootDur, depth: 0, color: theme.mode === "dark" ? "#374151" : "#e5e7eb" });
+    // Models a Gemma 3N E4B single-token decode step on the pccx v002
+    // KV260 floorplan. Each transformer layer is fully broken out into
+    // its attention + FFN sub-operations so the flame graph tells the
+    // real story: Q/K/V projections, RoPE rotation, QK · softmax · AV,
+    // FFN gate / up / SiLU / down, LAuReL parallel branch, and the
+    // PLE shadow-stream update.
+    const d = theme.mode === "dark";
+    const PALETTE = {
+      root:     d ? "#374151" : "#e5e7eb",
+      layer:    d ? "#1f2937" : "#f3f4f6",
+      norm:     "#64748b",
+      qkv:      "#0ea5e9",   // attention projections
+      rope:     "#0284c7",
+      scores:   "#a855f7",   // QK · softmax · AV
+      attnOut:  "#6366f1",
+      ffnGate:  "#f59e0b",
+      ffnUp:    "#f97316",
+      ffnDown:  "#ea580c",
+      silu:     "#eab308",
+      laurel:   "#8b5cf6",
+      ple:      "#14b8a6",
+      residual: "#22c55e",
+      dmaRead:  "#6a9955",
+      mac:      "#4fc1ff",
+      dmaWrite: "#dcdcaa",
+      stall:    "#c586c0",
+    };
 
-    // Layers
-    for (const layer of layers) {
-      const lDur = 15000 + Math.random() * 10000;
-      demoSpans.push({ name: layer, start: t, duration: lDur, depth: 1, color: colors[Math.floor(Math.random() * colors.length)] });
-      
-      // Hardware phases inside layer
-      let ht = t;
-      const phases = [
-        { n: "DMA_Read_Wait", w: 0.1 },
-        { n: "MAC_Compute", w: 0.7 },
-        { n: "DMA_Write", w: 0.2 },
-      ];
-      
-      for (const p of phases) {
-        const pdur = lDur * p.w;
-        demoSpans.push({ name: p.n, start: ht, duration: pdur, depth: 2, color: colors[Math.floor(Math.random() * colors.length)] });
-        ht += pdur;
+    const demo: Span[] = [];
+    const N_LAYERS = 10;  // sample — Gemma 3N has 35 total; rest aggregated.
+    const layerCycles = 420;
+    const embedCycles = 180;
+    const sampleCycles = 140;
+
+    let t = 0;
+    const rootStart = 0;
+
+    // --- Embedding lookup + initial RMSNorm ---
+    demo.push({ name: "embed_lookup",           start: t,            duration: 80,  depth: 1, color: PALETTE.ple });
+    demo.push({ name: "dma_read · 2048 × 27b",  start: t + 5,        duration: 60,  depth: 2, color: PALETTE.dmaRead });
+    demo.push({ name: "rms_norm_pre",           start: t + 80,       duration: 40,  depth: 1, color: PALETTE.norm });
+    demo.push({ name: "altup_broadcast[0..3]",  start: t + 120,      duration: 60,  depth: 1, color: PALETTE.ple });
+    t += embedCycles;
+
+    // --- 10 transformer layers, one breakdown per layer ---
+    for (let L = 0; L < N_LAYERS; L++) {
+      const layerStart = t;
+      demo.push({ name: `layer_${L}`, start: layerStart, duration: layerCycles, depth: 1, color: PALETTE.layer });
+
+      // pre-attention RMSNorm
+      demo.push({ name: "rms_norm", start: t, duration: 18, depth: 2, color: PALETTE.norm });
+      t += 18;
+
+      // Q / K / V GEMV projections (shared D×D)
+      const qkvDur = 80;
+      demo.push({ name: "QKV_proj (GEMV)", start: t, duration: qkvDur, depth: 2, color: PALETTE.qkv });
+      demo.push({ name: "dma_read · W_qkv",    start: t,          duration: 14, depth: 3, color: PALETTE.dmaRead });
+      demo.push({ name: "mac · 3×D×D",         start: t + 14,     duration: qkvDur - 20, depth: 3, color: PALETTE.mac });
+      demo.push({ name: "dma_write · q,k,v",   start: t + qkvDur - 6, duration: 6,  depth: 3, color: PALETTE.dmaWrite });
+      t += qkvDur;
+
+      // RoPE rotation (θ = 10 000 local / 1 000 000 global, 5-layer cycle)
+      const rope = L % 5 === 4 ? "RoPE_global" : "RoPE_local";
+      demo.push({ name: rope, start: t, duration: 22, depth: 2, color: PALETTE.rope });
+      t += 22;
+
+      // Cross-layer KV cache: layers 20..34 reuse 18/19 — model here by
+      // skipping the K/V write on ≥20 (we don't reach 20 in N_LAYERS=10,
+      // but keep the split so a future N_LAYERS=35 looks right).
+      const ownsKV = L < 20;
+      if (ownsKV) {
+        demo.push({ name: "kv_cache_write", start: t, duration: 12, depth: 2, color: PALETTE.dmaWrite });
+        t += 12;
       }
-      
-      t += lDur + Math.random() * 500;
+
+      // Attention scores: Q·Kᵀ → softmax → A·V
+      const scoresStart = t;
+      const scoresDur = 110;
+      demo.push({ name: "attn_scores (softmax skipped-scaling)", start: scoresStart, duration: scoresDur, depth: 2, color: PALETTE.scores });
+      demo.push({ name: "Q·Kᵀ (GEMM)",        start: scoresStart,        duration: 40, depth: 3, color: PALETTE.mac });
+      demo.push({ name: "cvo · exp+reduce",   start: scoresStart + 40,   duration: 28, depth: 3, color: PALETTE.scores });
+      demo.push({ name: "cvo · recip",        start: scoresStart + 68,   duration: 12, depth: 3, color: PALETTE.scores });
+      demo.push({ name: "A·V (GEMM)",         start: scoresStart + 80,   duration: 30, depth: 3, color: PALETTE.mac });
+      t += scoresDur;
+
+      // Output projection
+      const outDur = 40;
+      demo.push({ name: "attn_out (GEMV)", start: t, duration: outDur, depth: 2, color: PALETTE.attnOut });
+      demo.push({ name: "mac · D×D",  start: t + 4,       duration: outDur - 10, depth: 3, color: PALETTE.mac });
+      t += outDur;
+
+      // Residual add (AltUp: four streams updated)
+      demo.push({ name: "altup_residual (xs[0..3])", start: t, duration: 14, depth: 2, color: PALETTE.residual });
+      t += 14;
+
+      // post-attention RMSNorm
+      demo.push({ name: "rms_norm", start: t, duration: 14, depth: 2, color: PALETTE.norm });
+      t += 14;
+
+      // FFN: gate (with Gaussian Top-K sparsity), up, SiLU, down + LAuReL parallel branch
+      const ffnStart = t;
+      const ffnDur = 92;
+      demo.push({ name: "ffn + LAuReL", start: ffnStart, duration: ffnDur, depth: 2, color: PALETTE.ffnGate });
+      demo.push({ name: "gate (topK ~5%)",     start: ffnStart,          duration: 26, depth: 3, color: PALETTE.ffnGate });
+      demo.push({ name: "stall · mask_apply",  start: ffnStart + 10,     duration: 6,  depth: 3, color: PALETTE.stall });
+      demo.push({ name: "up",                  start: ffnStart + 26,     duration: 22, depth: 3, color: PALETTE.ffnUp });
+      demo.push({ name: "silu",                start: ffnStart + 48,     duration: 8,  depth: 3, color: PALETTE.silu });
+      demo.push({ name: "down",                start: ffnStart + 56,     duration: 24, depth: 3, color: PALETTE.ffnDown });
+      demo.push({ name: "laurel (D×64, 64×D)", start: ffnStart + 40,     duration: 32, depth: 3, color: PALETTE.laurel });
+      demo.push({ name: "scale 1/√2",          start: ffnStart + 72,     duration: 8,  depth: 3, color: PALETTE.scores });
+      t = ffnStart + ffnDur;
+
+      // PLE shadow stream update (layers 0..9 → xs[1..3] only)
+      demo.push({ name: "ple_shadow (xs[1..3])", start: t, duration: 18, depth: 2, color: PALETTE.ple });
+      t += 18;
+
+      // fill remainder with a small DMA/write-back
+      const slack = layerStart + layerCycles - t;
+      if (slack > 0) {
+        demo.push({ name: "barrier_sync", start: t, duration: slack, depth: 2, color: PALETTE.stall });
+        t = layerStart + layerCycles;
+      }
     }
-    
-    setSpans(demoSpans);
-    setTotalCycles(rootDur);
-    vp.current.cpp = rootDur / 800; // default width guess
+
+    // --- Remaining 25 layers aggregated as one bar ---
+    const restDur = (35 - N_LAYERS) * layerCycles;
+    demo.push({ name: "layers 10..34 (aggregated)", start: t, duration: restDur, depth: 1, color: PALETTE.layer });
+    demo.push({ name: "rms_norm + attn + ffn × 25", start: t, duration: restDur, depth: 2, color: PALETTE.norm });
+    t += restDur;
+
+    // --- LM head + sampler ---
+    demo.push({ name: "lm_head (GEMV)",     start: t,                 duration: 90,            depth: 1, color: PALETTE.attnOut });
+    demo.push({ name: "mac · Vocab × D",    start: t + 8,             duration: 72,            depth: 2, color: PALETTE.mac });
+    demo.push({ name: "cvo · topk_sampler", start: t + 90,            duration: sampleCycles - 90, depth: 1, color: PALETTE.scores });
+    t += sampleCycles;
+
+    // Root spans the whole decode step.
+    demo.unshift({ name: "decode_step_0 (Gemma 3N E4B)", start: rootStart, duration: t, depth: 0, color: PALETTE.root });
+
+    setSpans(demo);
+    setTotalCycles(t);
+    vp.current.cpp = t / 1000;
     setLoading(false);
   }, [theme.mode]);
 

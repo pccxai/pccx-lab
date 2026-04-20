@@ -88,8 +88,6 @@ function buildMenus(act: (a: string) => () => void): Menu[] {
       { label: "Simulation Config…",                            action: act("run.config") },
       { label: "Set Tile Count…",                               action: act("run.tiles") },
       { label: "Set Core Count…",                               action: act("run.cores") },
-      { separator: true, label: "" },
-      { label: "Run with Enterprise Engine",                    action: act("run.enterprise"), disabled: true },
     ]},
     { label: "Tools", items: [
       { label: "Extension Manager",                             action: act("tools.extensions") },

@@ -4,12 +4,12 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Group, Panel, Separator } from "react-resizable-panels";
 
 import { ThemeProvider, useTheme } from "./ThemeContext";
+import { I18nProvider, useI18n } from "./i18n";
 import { TitleBar }          from "./TitleBar";
 import { MenuBar }           from "./MenuBar";
 import { MainToolbar }       from "./MainToolbar";
 import { StatusBar }         from "./StatusBar";
 import { CanvasView }        from "./CanvasView";
-import { PerfChart }         from "./PerfChart";
 import { NodeEditor }        from "./NodeEditor";
 import { Timeline }          from "./Timeline";
 import { CommandPalette }    from "./CommandPalette";
@@ -22,6 +22,7 @@ import { MemoryDump }        from "./MemoryDump";
 import { WaveformViewer }    from "./WaveformViewer";
 import { VerificationSuite } from "./VerificationSuite";
 import { Roofline }          from "./Roofline";
+import { BottomPanel }       from "./BottomPanel";
 
 import { Badge, Button, Flex, TextField } from "@radix-ui/themes";
 import {
@@ -81,7 +82,7 @@ function AppInner() {
   const theme = useTheme();
   const isDark = theme.mode === "dark";
   const [header, setHeader]       = useState<any>(null);
-  const [license, setLicense]     = useState("Community Edition");
+  const [license, setLicense]     = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("timeline");
   const [traceLoaded, setTraceLoaded] = useState(false);
   const [copilotVisible, setCopilotVisible] = useState(true);
@@ -210,7 +211,7 @@ function AppInner() {
         break;
       case "file.exit": win.close(); break;
       case "help.about":
-        addMsg("system", "pccx-lab v0.4.0 — NPU Architecture Profiler\nLicense: Apache 2.0 (Community)\nModules: core · ui · ai_copilot · uvm_bridge");
+        addMsg("system", "pccx-lab v0.4.0 — NPU Architecture Profiler\nLicense: Apache 2.0\nModules: core · ui · ai_copilot · uvm_bridge");
         break;
       default: addMsg("system", `[${action}] — Coming soon`);
     }
@@ -261,7 +262,7 @@ function AppInner() {
               body: JSON.stringify({
                 model: "gpt-4o-mini",
                 messages: [
-                  { role: "system", content: "You are the AI Copilot for pccx-lab Enterprise EDA tool. You assist with SystemVerilog, UVM, and NPU bottleneck analysis. Output context: " + ctx },
+                  { role: "system", content: "You are the AI Copilot for pccx-lab EDA profiler. You assist with SystemVerilog, UVM, and NPU bottleneck analysis. Output context: " + ctx },
                   ...messages.filter(m => m.role !== "system").map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.content })),
                   { role: "user", content: text }
                 ]
@@ -372,7 +373,7 @@ function AppInner() {
                 </div>
               </Panel>
 
-              {/* Bottom panels (Telemetry or Copilot Bottom Dock) */}
+              {/* Bottom tabbed panel — Log / Console / Live Telemetry */}
               {(bottomVisible || (copilotVisible && copilotDock === "bottom")) && (
                 <>
                   <ResizeHandle direction="vertical" />
@@ -380,15 +381,7 @@ function AppInner() {
                      <Group direction="horizontal">
                         {bottomVisible && (
                           <Panel defaultSize={copilotDock === "bottom" && copilotVisible ? 50 : 100}>
-                            <div className="w-full h-full flex flex-col" style={{ background: panelBg }}>
-                               <div className="flex items-center px-3 shrink-0" style={{ height: 26, borderBottom: `1px solid ${border}` }}>
-                                 <span style={{ fontSize: 10, fontWeight: 700, color: theme.textMuted, letterSpacing: "0.04em" }}>LIVE TELEMETRY</span>
-                                 <div className="flex-1" />
-                                 <span style={{ fontSize: 9, color: theme.success, marginRight: 16 }}>● Recording</span>
-                                 <button onClick={() => setBottomVisible(false)} style={{ fontSize: 11, color: theme.textMuted, cursor: "pointer" }}>✕</button>
-                               </div>
-                               <div className="flex-1 min-h-0"><PerfChart /></div>
-                            </div>
+                            <BottomPanel />
                           </Panel>
                         )}
                         {bottomVisible && copilotVisible && copilotDock === "bottom" && <ResizeHandle/>}
@@ -437,7 +430,9 @@ function AppInner() {
 function App() {
   return (
     <ThemeProvider>
-      <AppInner />
+      <I18nProvider>
+        <AppInner />
+      </I18nProvider>
     </ThemeProvider>
   );
 }

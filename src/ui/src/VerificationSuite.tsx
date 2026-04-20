@@ -67,7 +67,7 @@ export function VerificationSuite() {
       {/* Verification Top Toolbar */}
       <div className="flex items-center px-4 h-12 shrink-0 border-b" style={{ borderColor: theme.border, background: theme.bgSurface }}>
         <ShieldCheck size={18} className="mr-2" style={{ color: theme.accent }} />
-        <span style={{ fontWeight: 600, fontSize: 13, marginRight: 24 }}>Enterprise Verification Suite</span>
+        <span style={{ fontWeight: 600, fontSize: 13, marginRight: 24 }}>Verification Suite</span>
         
         <div className="flex bg-black/20 rounded p-1 gap-1" style={{ border: `1px solid ${theme.border}` }}>
           {[
