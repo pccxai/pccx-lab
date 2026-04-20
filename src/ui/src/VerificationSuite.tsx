@@ -4,6 +4,7 @@ import { CheckCircle, AlertOctagon, TerminalSquare, ShieldCheck, Bug, Activity, 
 import { SynthStatusCard } from "./SynthStatusCard";
 import { VerificationRunner } from "./VerificationRunner";
 import { RooflineCard } from "./RooflineCard";
+import { BottleneckCard } from "./BottleneckCard";
 
 type VerifyTab = "isa" | "api" | "uvm" | "synth";
 
@@ -174,6 +175,7 @@ export function VerificationSuite() {
                 timingPath={DEFAULT_TIMING_PATH}
               />
               <RooflineCard />
+              <BottleneckCard />
               <p className="text-[11px] mt-1" style={{ color: theme.textMuted }}>
                 Paths are relative to the <code>pccx-lab</code> binary's working directory.
                 Override via props when embedding this widget elsewhere.
