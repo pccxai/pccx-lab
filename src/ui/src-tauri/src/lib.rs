@@ -5,7 +5,7 @@ use pccx_core::hw_model::HardwareModel;
 use pccx_ai_copilot::{Extension, get_available_extensions, compress_context, generate_uvm_sequence};
 use std::fs::File;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 // ─── Application State ────────────────────────────────────────────────────────
 
@@ -21,8 +21,13 @@ struct AppState {
 // ─── Tauri Commands ───────────────────────────────────────────────────────────
 
 /// Loads a .pccx file, validates its format, and caches the trace and flat buffer.
+/// Emits a `trace-loaded` event on success so the UI can re-fetch and refresh.
 #[tauri::command]
-fn load_pccx(path: &str, state: State<'_, AppState>) -> Result<PccxHeader, String> {
+fn load_pccx(
+    path: &str,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<PccxHeader, String> {
     let mut file = File::open(path).map_err(|e| format!("Cannot open '{}': {}", path, e))?;
     let pccx = PccxFile::read(&mut file).map_err(|e| e.to_string())?;
 
@@ -35,6 +40,9 @@ fn load_pccx(path: &str, state: State<'_, AppState>) -> Result<PccxHeader, Strin
         // Cache the full trace for analytics
         *state.trace.lock().unwrap() = Some(trace);
     }
+
+    // Notify the front-end so visualisers (Timeline, FlameGraph, …) can reload.
+    let _ = app.emit("trace-loaded", &pccx.header);
 
     Ok(pccx.header)
 }

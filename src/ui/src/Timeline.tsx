@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useTheme } from "./ThemeContext";
 
 const EVENT_COLORS: Record<number, { fill: string; label: string }> = {
@@ -60,18 +61,23 @@ export function Timeline() {
   })();
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    const applyPayload = async (allowDemoFallback: boolean) => {
       try {
         const payload: Uint8Array = await invoke("fetch_trace_payload");
         if (payload.byteLength === 0) throw new Error("empty");
         const parsed = parsePayload(payload);
+        if (cancelled) return;
         setEvents(parsed);
-        setTotalCycles(parsed.reduce((m, e) => Math.max(m, e.start + e.duration), 0));
+        const tc = parsed.reduce((m, e) => Math.max(m, e.start + e.duration), 0);
+        setTotalCycles(tc);
         setNumCores(parsed.reduce((m, e) => Math.max(m, e.core_id), 0) + 1);
         if (canvasRef.current) {
-          vp.current.cpp = parsed.reduce((m, e) => Math.max(m, e.start + e.duration), 0) / (canvasRef.current.clientWidth - LANE_LABEL_W);
+          vp.current.cpp = tc / (canvasRef.current.clientWidth - LANE_LABEL_W);
         }
       } catch {
+        if (!allowDemoFallback) return;
         const demo: ParsedEvent[] = [];
         for (let c = 0; c < 8; c++) {
           let t = c * 50;
@@ -82,12 +88,33 @@ export function Timeline() {
             t += dur + 10 + Math.floor(Math.random() * 20);
           }
         }
+        if (cancelled) return;
         setEvents(demo);
         setTotalCycles(demo.reduce((m, e) => Math.max(m, e.start + e.duration), 0));
         setNumCores(8);
         vp.current.cpp = 5;
-      } finally { setLoading(false); }
-    })();
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    // Initial load: demo fallback if no trace yet.
+    void applyPayload(true);
+
+    // Subscribe to trace-loaded events so the canvas picks up freshly
+    // loaded .pccx files without a manual reload. Only available in the
+    // native Tauri window; gracefully no-ops in the Vite browser preview.
+    let unlisten: (() => void) | undefined;
+    listen("trace-loaded", () => {
+      void applyPayload(false);
+    })
+      .then(fn => { unlisten = fn; })
+      .catch(() => { /* browser mode — no Tauri event bus */ });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   const isDark = theme.mode === "dark";
