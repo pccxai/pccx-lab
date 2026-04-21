@@ -21,7 +21,18 @@ function utilToColor(util: number): THREE.Color {
   return new THREE.Color().setHSL(hue / 360, 0.9, 0.55);
 }
 
-export function CanvasView() {
+// Round-5 T-3: `animated` gates the ornamental colour pulse wave.
+// When false (e.g. paused playback) the array renders static per-core
+// utilisation only — no decorative heartbeat.  Default true preserves
+// the existing <CanvasView /> call sites.
+interface CanvasViewProps { animated?: boolean; isPlaying?: boolean }
+
+export function CanvasView({ animated = true, isPlaying }: CanvasViewProps = {}) {
+  // `isPlaying` is the canonical name; `animated` is the prop alias
+  // the ticket calls out.  Treat either as the animation gate.
+  const animationEnabled = isPlaying ?? animated;
+  const animRef = useRef<boolean>(animationEnabled);
+  animRef.current = animationEnabled;
   const mountRef  = useRef<HTMLDivElement>(null);
   const animIdRef = useRef<number>(0);
 
@@ -161,26 +172,27 @@ export function CanvasView() {
         mesh.rotation.y = mouse.current.rotY;
       }
 
-      // Subtle Z-scale pulse to simulate compute "heartbeat"
-      const pulse = 1.0 + 0.04 * Math.sin(phase);
-      dummy.scale.set(1, 1, pulse);
-
-      // Animate a travelling "wave" of activity across the array columns
-      let wi = 0;
-      for (let x = 0; x < COLS; x++) {
-        const wave = 0.5 + 0.5 * Math.sin(phase * 2 - x * 0.4);
-        for (let y = 0; y < ROWS; y++) {
-          // Combine per-core utilisation (baked) with wave animation
-          // We re-read the baked color and mix with wave
-          const col = new THREE.Color();
-          mesh.getColorAt(wi, col);
-          // Lerp brightness with wave
-          col.multiplyScalar(0.85 + 0.15 * wave);
-          mesh.setColorAt(wi, col);
-          wi++;
+      if (animRef.current) {
+        // Ornamental — W3C WAAPI pattern 3.  Not a data source; the
+        // `animated` prop guards this branch so a paused player
+        // shows a static array instead of a decorative heartbeat.
+        // Travelling "wave" of activity across the array columns.
+        let wi = 0;
+        for (let x = 0; x < COLS; x++) {
+          const wave = 0.5 + 0.5 * Math.sin(phase * 2 - x * 0.4);
+          for (let y = 0; y < ROWS; y++) {
+            // Combine per-core utilisation (baked) with wave animation
+            // We re-read the baked color and mix with wave
+            const col = new THREE.Color();
+            mesh.getColorAt(wi, col);
+            // Lerp brightness with wave
+            col.multiplyScalar(0.85 + 0.15 * wave);
+            mesh.setColorAt(wi, col);
+            wi++;
+          }
         }
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
       }
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
       renderer.render(scene, camera);
     };

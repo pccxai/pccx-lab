@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTheme } from "./ThemeContext";
+import { useLiveWindow } from "./hooks/useLiveWindow";
 import {
   FileText, Download, Check, Loader2, BarChart2,
   Cpu, Zap, Clock, AlertTriangle, Settings2, BookOpen, Beaker, TableProperties, ShieldCheck,
@@ -93,30 +94,44 @@ function PreviewSection({ section, data }: { section: Section; data: any }) {
         </div>
       );
 
-    case "utilisation":
+    case "utilisation": {
+      // Round-5 T-3: no synthetic placeholder.  The report renders a
+      // single summary card sourced from `get_core_utilisation` (if
+      // loaded) or an honest "no trace" notice — never a random grid.
+      const coreUtils: { core_id: number; util_pct: number }[] = data?.coreUtils ?? [];
       return (
         <div>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: headColor, marginBottom: 8 }}>4. Core Utilisation</h3>
           <p style={{ fontSize: 11, color: textColor, marginBottom: 8 }}>
             MAC compute phase utilisation across all cores. Cores with &lt;40% utilisation are flagged.
           </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-            {Array.from({ length: data?.cores ?? 32 }, (_, i) => {
-              const u = 30 + Math.random() * 60;
-              const color = u > 70 ? "#22c55e" : u > 40 ? "#eab308" : "#ef4444";
-              return (
-                <div key={i} style={{
-                  width: 28, height: 28, borderRadius: 3, background: color + "33",
-                  border: `1px solid ${color}55`, display: "flex", alignItems: "center",
-                  justifyContent: "center", fontSize: 8, color, fontWeight: 600,
-                }}>
-                  {u.toFixed(0)}
-                </div>
-              );
-            })}
-          </div>
+          {coreUtils.length === 0 ? (
+            <div style={{
+              padding: 12, fontSize: 11, color: dimColor,
+              border: `1px dashed ${cardBdr}`, borderRadius: 6, background: cardBg,
+            }}>
+              No per-core utilisation available — load a .pccx trace to populate
+              this section (Yuan OSDI 2014 loud-fallback: no synthetic numbers).
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+              {coreUtils.map(({ core_id, util_pct }) => {
+                const color = util_pct > 70 ? "#22c55e" : util_pct > 40 ? "#eab308" : "#ef4444";
+                return (
+                  <div key={core_id} style={{
+                    width: 28, height: 28, borderRadius: 3, background: color + "33",
+                    border: `1px solid ${color}55`, display: "flex", alignItems: "center",
+                    justifyContent: "center", fontSize: 8, color, fontWeight: 600,
+                  }}>
+                    {util_pct.toFixed(0)}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       );
+    }
 
     case "bottleneck":
       return (

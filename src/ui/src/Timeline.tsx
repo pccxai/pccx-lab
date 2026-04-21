@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTheme } from "./ThemeContext";
+import { useLiveWindow } from "./hooks/useLiveWindow";
 
 const EVENT_COLORS: Record<number, { fill: string; label: string }> = {
   0: { fill: "#555555", label: "Unknown"         },
@@ -49,6 +50,14 @@ export function Timeline() {
 
   const vp = useRef({ offset: 0, cpp: 1, dragging: false, lastX: 0, selStart: -1 });
 
+  // Round-5 T-3: live event rate from the shared hook.  Used for the
+  // "N events/s" header pill + empty-state overlay (FlameGraph R4
+  // pattern) when the trace reducer returns 0 spans.
+  const { samples: liveSamples, hasTrace: liveHasTrace } = useLiveWindow();
+  const liveEventRate = liveHasTrace && liveSamples.length > 0
+    ? (liveSamples.reduce((a, s) => a + s.mac_util, 0) / liveSamples.length) * 1000
+    : 0;
+
   const stats = (() => {
     if (events.length === 0) return null;
     const counts: Record<number, number> = {};
@@ -78,14 +87,20 @@ export function Timeline() {
         }
       } catch {
         if (!allowDemoFallback) return;
+        // Deterministic onboarding fixture — no RNG.  Per-tid base
+        // durations jittered by index so the stripes don't collapse
+        // into a uniform grid.  Real activity comes from `useLiveWindow`
+        // (see setHasLive effect below); this path only fires when the
+        // trace IPC errors on first mount.
         const demo: ParsedEvent[] = [];
+        const bases = [300, 200, 150, 80, 50];
         for (let c = 0; c < 8; c++) {
           let t = c * 50;
           for (let i = 0; i < 30; i++) {
             const tid = (i % 5) + 1;
-            const dur = [300, 200, 150, 80, 50][tid - 1] + Math.floor(Math.random() * 100);
+            const dur = bases[tid - 1] + ((i * 37) % 100);
             demo.push({ core_id: c, start: t, duration: dur, type_id: tid });
-            t += dur + 10 + Math.floor(Math.random() * 20);
+            t += dur + 10 + ((i * 13) % 20);
           }
         }
         if (cancelled) return;
@@ -418,6 +433,7 @@ export function Timeline() {
                   <div>Total events: {events.length.toLocaleString()}</div>
                   <div>Total cycles: {totalCycles.toLocaleString()}</div>
                   <div>Avg duration: {stats.avg.toFixed(0)}</div>
+                  <div>Live rate: {liveHasTrace ? `${liveEventRate.toFixed(1)} ev/s` : "idle"}</div>
                   {Object.entries(stats.counts).map(([tid, cnt]) => (
                     <div key={tid} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <span style={{ width: 6, height: 6, borderRadius: 1, background: EVENT_COLORS[Number(tid)]?.fill, display: "inline-block" }} />

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTheme } from "./ThemeContext";
+import { useLiveWindow } from "./hooks/useLiveWindow";
 import {
   Activity, ZoomIn, ZoomOut, Maximize2, Search, Download,
   Filter, X, Crosshair, Bookmark,
@@ -126,12 +127,15 @@ function makeDemo(): Group[] {
     { id: "weight_valid", name: "weight_valid",  scope: "mac", width: 1, radix: "bin",
       events: step01(N_CYC, [24, 74, 92, 132]) },
     { id: "p_accum[47:0]", name: "p_accum",       scope: "mac", width: 48, radix: "hex",
+      // Deterministic seed.  When a real trace is loaded, a useEffect
+      // below overwrites these events from `useLiveWindow().samples`
+      // (mac_util ⇒ per-cycle accumulator delta).  Empty when no trace.
       events: (() => {
         const out: Event[] = [{ t: 0, v: 0 }];
         let acc = 0;
-        for (let c = 38; c < 74; c += 2) { acc += Math.floor(Math.random() * 512); out.push({ t: c, v: acc }); }
+        for (let c = 38; c < 74; c += 2) { acc += 256; out.push({ t: c, v: acc }); }
         out.push({ t: 74, v: acc });
-        for (let c = 98; c < 132; c += 2) { acc += Math.floor(Math.random() * 512); out.push({ t: c, v: acc }); }
+        for (let c = 98; c < 132; c += 2) { acc += 256; out.push({ t: c, v: acc }); }
         out.push({ t: 132, v: acc });
         return out;
       })() },
@@ -389,6 +393,29 @@ export function WaveformViewer() {
   const [demoGroups, setDemoGroups] = useState<Group[]>(makeDemo);
   const [vcdGroups,  setVcdGroups]  = useState<Group[] | null>(null);
   const groups: Group[] = vcdGroups ?? demoGroups;
+
+  // Round-5 T-3: when a real trace is loaded, drive the p_accum
+  // signal + cursor advancement from `fetch_live_window` instead of
+  // the deterministic demo increments.  Empty when no trace (Yuan
+  // OSDI 2014 loud-fallback path).
+  const { samples: liveSamples, hasTrace: liveHasTrace } = useLiveWindow();
+  useEffect(() => {
+    if (!liveHasTrace || vcdGroups) return;
+    // Overwrite the p_accum events with real mac_util deltas.
+    setDemoGroups(gs => gs.map(g => g.id !== "mac" ? g : {
+      ...g,
+      children: g.children.map(s => {
+        if (s.name !== "p_accum") return s;
+        const events: Event[] = [{ t: 0, v: 0 }];
+        let acc = 0;
+        liveSamples.forEach((sample, i) => {
+          acc += Math.floor(sample.mac_util * 512);
+          events.push({ t: 38 + i * 2, v: acc });
+        });
+        return { ...s, events };
+      }),
+    }));
+  }, [liveSamples, liveHasTrace, vcdGroups]);
 
   const setGroups = useCallback((updater: (g: Group[]) => Group[]) => {
     if (vcdGroups) setVcdGroups(g => updater(g ?? []));

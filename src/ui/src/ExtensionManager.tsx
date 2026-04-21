@@ -52,7 +52,10 @@ export function ExtensionManager() {
           );
           return prev;
         }
-        return { ...prev, [id]: Math.min(100, current + 4 + Math.random() * 6) };
+        // Round-5 T-3: fixed 20% tick (Yuan OSDI 2014 deterministic
+        // fixture).  No RNG — the extension store is not actually
+        // downloading anything; the bar just mirrors install state.
+        return { ...prev, [id]: Math.min(100, current + 20) };
       });
     }, 120);
   };
