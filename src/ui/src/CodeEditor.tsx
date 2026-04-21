@@ -1,6 +1,8 @@
-import { useState, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useState, useCallback } from "react";
+import Editor from "@monaco-editor/react";
+import { Play, Sparkles, TerminalSquare, X, Activity } from "lucide-react";
 import { useTheme } from "./ThemeContext";
+import { monarchSv, systemverilogLanguageConfig } from "./monarch_sv";
 
 // ─── Templates ────────────────────────────────────────────────────────────────
 
@@ -190,43 +192,6 @@ endclass`,
   },
 };
 
-import { Play, Sparkles, TerminalSquare, X, ChevronRight, Activity } from "lucide-react";
-
-// ─── Syntax Highlighter ───────────────────────────────────────────────────────
-const SV_KEYWORDS = new Set([
-  "class", "endclass", "function", "endfunction", "task", "endtask", "interface", "endinterface",
-  "module", "endmodule", "logic", "wire", "reg", "int", "virtual", "input", "output", "inout",
-  "clocking", "endclocking", "modport", "assert", "randomize", "inside", "constraint", "rand",
-  "super", "new", "this", "forever", "begin", "end", "case", "endcase", "if", "else",
-  "uvm_driver", "uvm_monitor", "uvm_env", "uvm_scoreboard", "uvm_sequence", "uvm_component",
-  "uvm_phase", "uvm_analysis_port", "uvm_analysis_imp", "posedge", "negedge", "iff"
-]);
-
-function HighlightedCode({ code, theme }: { code: string; theme: any }) {
-  const isDark = theme.mode === "dark";
-  const kwColor = isDark ? "#c586c0" : "#af00db";
-  const strColor = isDark ? "#ce9178" : "#a31515";
-  const numColor = isDark ? "#b5cea8" : "#098658";
-  const cmtColor = isDark ? "#6a9955" : "#008000";
-  const macColor = isDark ? "#4ec9b0" : "#267f99";
-
-  const tokens = code.split(/(\s+|[.,;()\[\]{}]+|"[^"]*"|`[a-zA-Z_]\w*|'b[01]+|'h[0-9a-fA-F]+|[0-9]+)/g);
-
-  return (
-    <div style={{ padding: "8px 12px", fontFamily: "JetBrains Mono, Menlo, monospace", fontSize: 11, lineHeight: "18px", color: theme.text, whiteSpace: "pre-wrap", zIndex: 0 }}>
-      {tokens.map((token, i) => {
-        if (!token) return null;
-        if (token.startsWith("//")) return <span key={i} style={{ color: cmtColor }}>{token}</span>;
-        if (token.startsWith('"')) return <span key={i} style={{ color: strColor }}>{token}</span>;
-        if (token.startsWith("`")) return <span key={i} style={{ color: macColor, fontWeight: 700 }}>{token}</span>;
-        if (SV_KEYWORDS.has(token)) return <span key={i} style={{ color: kwColor, fontWeight: 600 }}>{token}</span>;
-        if (/^('b[01]+|'h[0-9a-fA-F]+|[0-9]+)$/i.test(token)) return <span key={i} style={{ color: numColor }}>{token}</span>;
-        return <span key={i}>{token}</span>;
-      })}
-    </div>
-  );
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function CodeEditor() {
@@ -237,38 +202,60 @@ export function CodeEditor() {
     for (const [k, v] of Object.entries(TEMPLATES)) out[k] = v.code;
     return out;
   });
-  
+
   // AI Copilot state
   const [aiBoxOpen, setAiBoxOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Simulation state
+  // Simulation console state
   const [simDrawerOpen, setSimDrawerOpen] = useState(false);
   const [simLogs, setSimLogs] = useState<string[]>([]);
   const [isSimulating, setIsSimulating] = useState(false);
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const currentCode = files[activeFile] ?? "";
-  
+
   const isDark = theme.mode === "dark";
   const bg      = theme.bgEditor;
   const bgAlt   = theme.bgPanel;
   const border  = theme.border;
-  const textCol = theme.text;
   const lineCol = theme.textFaint;
   const kwColor = isDark ? "#c586c0" : "#7c3aed";
 
-  const handleChange = useCallback((val: string) => { setFiles(f => ({ ...f, [activeFile]: val })); }, [activeFile]);
+  const handleChange = useCallback((val: string | undefined) => {
+    setFiles(f => ({ ...f, [activeFile]: val ?? "" }));
+  }, [activeFile]);
+
+  // Register the Monarch SV grammar against the Monaco instance.
+  // `beforeMount` fires before the model is constructed, so the language
+  // id is registered before the Editor's initial tokenize.
+  //
+  // Monaco ships a built-in "systemverilog" basic-language, but our
+  // Monarch ruleset adds UVM type-keywords + IEEE 1800-2017 §B coverage
+  // that the stock tokenizer omits. setMonarchTokensProvider overrides
+  // any prior provider for the language id, so we unconditionally install
+  // ours after ensuring the id is registered.
+  const handleBeforeMount = useCallback((monaco: any) => {
+    const langs: Array<{ id: string }> = monaco.languages.getLanguages();
+    if (!langs.some(l => l.id === "systemverilog")) {
+      monaco.languages.register({
+        id: "systemverilog",
+        extensions: [".sv", ".svh", ".v", ".vh"],
+        aliases: ["SystemVerilog", "systemverilog", "sv"],
+      });
+    }
+    monaco.languages.setMonarchTokensProvider("systemverilog", monarchSv);
+    monaco.languages.setLanguageConfiguration(
+      "systemverilog",
+      systemverilogLanguageConfig,
+    );
+  }, []);
 
   const handleAiGenerate = async () => {
     if (!aiPrompt) return;
     setIsGenerating(true);
-    await new Promise(r => setTimeout(r, 1200)); // Simulating LLM Call
-    
-    // Inject mock AI code response
+    await new Promise(r => setTimeout(r, 400));
     const snippet = `\n  // [AI Generated] -> "${aiPrompt}"\n  \`uvm_info("AI_COPILOT", "Traffic generator initialized.", UVM_MEDIUM)\n`;
-    
     setFiles(f => ({ ...f, [activeFile]: f[activeFile] + snippet }));
     setAiPrompt("");
     setAiBoxOpen(false);
@@ -277,26 +264,20 @@ export function CodeEditor() {
 
   const runSimulation = () => {
     setSimDrawerOpen(true);
-    setSimLogs(["Initializing Vivado XSIM engine...", "Compiling SystemVerilog targets..."]);
-    setIsSimulating(true);
-    
-    let step = 0;
-    const seq = setInterval(() => {
-      step++;
-      if (step === 1) setSimLogs(l => [...l, "Parsing pccx_lab_uvm_env... [OK]"]);
-      if (step === 2) setSimLogs(l => [...l, "Elaborating design for kv260 target..."]);
-      if (step === 3) setSimLogs(l => [...l, "UVM_INFO @ 0: reporter [RNTST] Running test..."]);
-      if (step === 5) setSimLogs(l => [...l, `UVM_INFO @ 15000: SCB [SCB] Summary: 64 total transactions`]);
-      if (step === 6) {
-        setSimLogs(l => [...l, "Simulation finished successfully.", "Waveform trace saved to dump.vcd."]);
-        setIsSimulating(false);
-        clearInterval(seq);
-      }
-    }, 600);
+    setSimLogs([
+      "Initializing Vivado XSIM engine...",
+      "Compiling SystemVerilog targets...",
+      "Parsing pccx_lab_uvm_env... [OK]",
+      "Elaborating design for kv260 target...",
+      "UVM_INFO @ 0: reporter [RNTST] Running test...",
+      "UVM_INFO @ 15000: SCB [SCB] Summary: 64 total transactions",
+      "Simulation finished successfully.",
+      "Waveform trace saved to dump.vcd.",
+    ]);
+    setIsSimulating(false);
   };
 
-  const lines = currentCode.split("\n");
-  const lineCount = lines.length;
+  const lineCount = currentCode.split("\n").length;
 
   return (
     <div className="w-full h-full flex flex-col relative" style={{ background: bg }}>
@@ -321,12 +302,12 @@ export function CodeEditor() {
         ))}
         {Object.keys(files).filter(k => k.startsWith("gen_")).map(k => (
           <button key={k} onClick={() => setActiveFile(k)} style={{ fontSize: 11, padding: "0 14px", height: "100%", color: activeFile === k ? "#10b981" : lineCol, borderBottom: activeFile === k ? "2px solid #10b981" : "2px solid transparent", background: activeFile === k ? "rgba(16,185,129,0.1)" : "transparent", fontWeight: activeFile === k ? 600 : 400, whiteSpace: "nowrap" }}>
-            🔍 {k.replace("gen_", "")}
+            {k.replace("gen_", "")}
           </button>
         ))}
-        
+
         <div className="flex-1" />
-        
+
         <div className="flex gap-2 pr-3">
           <button onClick={() => setAiBoxOpen(true)} className="flex items-center gap-1.5 px-3 py-1 rounded transition-all" style={{ fontSize: 11, background: isDark ? "#2a2a2a" : "#ede9fe", color: kwColor, border: `1px solid ${isDark ? "#444" : "#c4b5fd"}`, fontWeight: 600 }}>
             <Sparkles size={12} /> Ask AI
@@ -355,24 +336,27 @@ export function CodeEditor() {
         </div>
       )}
 
-      {/* ─── Editor Area (Monaco Lookalike) ─── */}
-      <div className="flex-1 flex overflow-hidden min-h-0 relative group">
-        <div className="shrink-0 overflow-hidden select-none" style={{ width: 44, background: bgAlt, borderRight: `1px solid ${border}`, padding: "8px 0", fontFamily: "JetBrains Mono, Menlo, monospace", fontSize: 11, lineHeight: "18px", color: lineCol, textAlign: "right" }}>
-          {Array.from({ length: lineCount }, (_, i) => (<div key={i} style={{ paddingRight: 8 }}>{i + 1}</div>))}
-        </div>
-
-        <div className="flex-1 relative overflow-hidden bg-transparent">
-          {/* Syntax Highlight Layer */}
-          <div className="absolute inset-0 pointer-events-none w-full h-full">
-            <HighlightedCode code={currentCode} theme={theme} />
-          </div>
-          
-          {/* Invisible Interactive Textarea */}
-          <textarea
-            ref={textareaRef} value={currentCode} onChange={(e) => handleChange(e.target.value)} spellCheck={false}
-            style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", resize: "none", outline: "none", border: "none", background: "transparent", color: "transparent", caretColor: textCol, padding: "8px 12px", fontFamily: "JetBrains Mono, Menlo, monospace", fontSize: 11, lineHeight: "18px", tabSize: 2, whiteSpace: "pre", zIndex: 10 }}
-          />
-        </div>
+      {/* ─── Monaco Editor ─── */}
+      <div className="flex-1 min-h-0 relative">
+        <Editor
+          height="100%"
+          language="systemverilog"
+          theme={isDark ? "vs-dark" : "light"}
+          value={currentCode}
+          onChange={handleChange}
+          beforeMount={handleBeforeMount}
+          options={{
+            fontFamily: "JetBrains Mono, Menlo, monospace",
+            fontSize: 12,
+            lineNumbers: "on",
+            minimap: { enabled: true },
+            scrollBeyondLastLine: false,
+            automaticLayout: true,
+            renderWhitespace: "selection",
+            tabSize: 2,
+            wordWrap: "off",
+          }}
+        />
       </div>
 
       {/* ─── Vivado / Simulation Terminal Drawer ─── */}
@@ -388,7 +372,7 @@ export function CodeEditor() {
           <div className="flex-1 overflow-y-auto p-3 flex flex-col font-mono text-[11px]" style={{ color: "#d4d4d4", lineHeight: "1.6" }}>
             {simLogs.map((log, i) => (
               <div key={i} className="flex gap-2">
-                <span className="text-gray-500">[{new Date().toISOString().split("T")[1].substring(0,8)}]</span>
+                <span className="text-gray-500">[{new Date().toISOString().split("T")[1].substring(0, 8)}]</span>
                 <span style={{ color: log.includes("SUCCESS") || log.includes("[OK]") || log.includes("finished") ? "#4ade80" : log.includes("Error") ? "#f87171" : "#d4d4d4" }}>
                   {log}
                 </span>
