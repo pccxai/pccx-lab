@@ -101,6 +101,8 @@ export function FlameGraph() {
   const [diffMode, setDiffMode]   = useState(false);
   // Optional second run — same span shape, different durations.
   const [runB, setRunB]           = useState<Map<string, number> | null>(null);
+  const [compareErr, setCompareErr] = useState<string | null>(null);
+  const [compareLabel, setCompareLabel] = useState<string | null>(null);
 
   const vp = useRef({ offset: 0, cpp: 1, dragging: false, lastX: 0 });
 
@@ -116,19 +118,54 @@ export function FlameGraph() {
   }, []);
 
   // Load a second run for side-by-side duration ratio colouring.
+  // Real path: Tauri dialog → `load_pccx_alt` → `fetch_trace_payload_b`
+  // → `parseFlatBuffer` → build a map keyed by the same `${name}@${start}`
+  // scheme the draw-loop already consumes.  Per Gregg IEEE SW 2018 §III-D
+  // the contract is two folded-stack sources + per-frame colour delta.
   const loadRunB = async () => {
+    setCompareErr(null);
     try {
-      // Simulate loading a second trace — in production this would be a
-      // native file picker via Tauri and `invoke('load_pccx', { path })`.
-      const synthetic = new Map<string, number>();
-      for (const s of spans) {
-        // Make each span 0.6× – 1.8× its run-A duration for visual diff.
-        const jitter = 0.6 + Math.random() * 1.2;
-        synthetic.set(`${s.name}@${s.start}`, Math.max(1, Math.round(s.duration * jitter)));
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        filters: [
+          { name: "pccx trace", extensions: ["pccx"] },
+          { name: "All files",  extensions: ["*"]    },
+        ],
+      });
+      if (!picked) return; // user cancelled — state untouched
+      const path = typeof picked === "string" ? picked : (picked as any).path;
+      if (!path) return;
+
+      await invoke("load_pccx_alt", { path });
+      const payload = await invoke<Uint8Array>("fetch_trace_payload_b");
+      const bytes = payload instanceof Uint8Array
+        ? payload
+        : new Uint8Array(payload as ArrayBufferLike);
+      if (bytes.byteLength < 24) {
+        setCompareErr("Compare trace is empty.");
+        return;
       }
-      setRunB(synthetic);
+      const eventsB = parseFlatBuffer(bytes);
+      const spansB  = events_to_spans(eventsB);
+      const m = new Map<string, number>();
+      for (const s of spansB) {
+        m.set(`${s.name}@${s.start}`, s.duration);
+      }
+      setRunB(m);
       setDiffMode(true);
-    } catch { /* noop */ }
+      setCompareLabel(path.split(/[\\/]/).pop() ?? path);
+    } catch (e: any) {
+      setCompareErr(`${e}`);
+    }
+  };
+
+  const clearRunB = () => {
+    setRunB(null);
+    setDiffMode(false);
+    setCompareLabel(null);
+    setCompareErr(null);
   };
 
   useEffect(() => {
@@ -575,7 +612,7 @@ export function FlameGraph() {
         <button aria-label="Find dominant bottleneck" onClick={handleAIHotspot} style={{ ...btnStyle, background: theme.accent, color: "#fff", border: `1px solid ${theme.accent}`, display: "flex", alignItems: "center", gap: 4 }} className="hover:opacity-80">
            Find Bottleneck
         </button>
-        <button aria-label="Load second run for comparison" onClick={loadRunB} style={btnStyle} className="hover:opacity-80" title="Load second run for duration-ratio overlay">Compare run…</button>
+        <button aria-label="Load second run for comparison" onClick={loadRunB} style={btnStyle} className="hover:opacity-80" title="Open a second .pccx for per-span duration ratio overlay">Compare run…</button>
         {runB && (
           <button
             aria-label={`Toggle diff mode, currently ${diffMode ? "on" : "off"}`}
@@ -585,6 +622,17 @@ export function FlameGraph() {
             title="Ctrl+Shift+D">
             Diff: {diffMode ? "ON" : "OFF"}
           </button>
+        )}
+        {compareLabel && (
+          <span style={{ fontSize: 9, color: theme.textDim, fontFamily: "monospace" }} title={compareLabel}>
+            B: {compareLabel}
+            <button aria-label="Clear compare trace" onClick={clearRunB} style={{ marginLeft: 6, color: theme.textMuted }}>×</button>
+          </span>
+        )}
+        {compareErr && (
+          <span style={{ fontSize: 9, color: theme.error }} title={compareErr}>
+            compare failed: {compareErr}
+          </span>
         )}
         {diffMode && runB && (
           <span style={{ fontSize: 9, color: theme.textMuted, display: "flex", alignItems: "center", gap: 6 }}>
