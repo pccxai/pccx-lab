@@ -32,7 +32,7 @@ pub use license::{get_license_info, run_high_speed_simulation};
 pub use hw_model::{HardwareModel, AxiBusConfig, BramConfig, MacArrayConfig};
 pub use cycle_estimator::{CycleEstimator, TileOperation};
 pub use synth_report::{SynthReport, UtilSummary, TimingSummary, load_from_files};
-pub use roofline::{RooflinePoint, analyze as analyze_roofline};
+pub use roofline::{RooflinePoint, RooflineBand, analyze as analyze_roofline, analyze_hierarchical};
 pub use report::render_markdown;
 pub use bottleneck::{detect as detect_bottlenecks, BottleneckInterval, BottleneckKind, DetectorConfig};
 pub use coverage::{merge_jsonl as merge_coverage_jsonl, CovBin, CovGroup, CrossTuple, MergedCoverage, CoverageError};

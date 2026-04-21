@@ -2,7 +2,11 @@ use pccx_core::pccx_format::{PccxFile, PccxHeader};
 use pccx_core::license::get_license_info as core_license_info;
 use pccx_core::trace::NpuTrace;
 use pccx_core::hw_model::HardwareModel;
-use pccx_core::roofline::{analyze as analyze_roofline_fn, RooflinePoint};
+use pccx_core::roofline::{
+    analyze as analyze_roofline_fn,
+    analyze_hierarchical as analyze_roofline_hier_fn,
+    RooflineBand, RooflinePoint,
+};
 use pccx_core::live_window::{LiveSample, LiveWindow};
 use pccx_ai_copilot::{
     Extension, compress_context, generate_uvm_sequence,
@@ -159,6 +163,21 @@ fn analyze_roofline(state: State<'_, AppState>) -> Result<RooflinePoint, String>
     let trace = trace_guard.as_ref().ok_or("No trace loaded")?;
     let hw = HardwareModel::pccx_reference();
     Ok(analyze_roofline_fn(trace, &hw))
+}
+
+/// Emits one `RooflineBand` per memory tier (Cache-Aware / Hierarchical
+/// Roofline — Ilic 2014 DOI 10.1109/L-CA.2013.6, Yang 2020
+/// arXiv:2009.02449). The UI's Roofline panel renders each band as a
+/// dashed ceiling + a trajectory segment so the user sees where the
+/// workload dwells across the pccx memory hierarchy.
+#[tauri::command]
+fn analyze_roofline_hierarchical(
+    state: State<'_, AppState>,
+) -> Result<Vec<RooflineBand>, String> {
+    let trace_guard = state.trace.lock().unwrap();
+    let trace = trace_guard.as_ref().ok_or("No trace loaded")?;
+    let hw = HardwareModel::pccx_reference();
+    Ok(analyze_roofline_hier_fn(trace, &hw))
 }
 
 /// Scans the currently-cached trace for per-class bottleneck windows and
@@ -644,6 +663,7 @@ pub fn run() {
             run_verification,
             list_pccx_traces,
             analyze_roofline,
+            analyze_roofline_hierarchical,
             list_uvm_strategies,
             generate_markdown_report,
             detect_bottlenecks,

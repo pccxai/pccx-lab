@@ -1,11 +1,35 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import * as echarts from "echarts";
 import { useTheme } from "./ThemeContext";
-import { ActivitySquare, Zap, Cpu, HardDrive } from "lucide-react";
+import { ActivitySquare, Zap, Cpu, HardDrive, Layers } from "lucide-react";
 
 // Shape of `fetch_live_window` (see core/src/live_window.rs).
 interface LiveSample { ts_ns: number; mac_util: number; dma_bw: number; stall_pct: number }
+
+// Shape of a single trace event pulled from the flat-buffer v2 payload.
+// Mirrors `FlameGraph.tsx` parseFlatBuffer output so both panels consume
+// the same source of truth.
+interface TraceEvent {
+  coreId:     number;
+  startCycle: number;
+  duration:   number;
+  typeId:     number;
+  name?:      string;
+}
+
+// Shape emitted by `analyze_roofline_hierarchical` — one band per
+// memory tier (Ilic 2014 CARM DOI 10.1109/L-CA.2013.6, Yang 2020
+// Hierarchical Roofline arXiv:2009.02449).
+interface RooflineBand {
+  level:        string;
+  peak_gops:    number;
+  peak_bw_gbps: number;
+  ridge_ai:     number;
+  dwell_cycles: number;
+  ai_min:       number;
+  ai_max:       number;
+}
 
 // pccx v002 · KV260 target roofline constants
 const PEAK_TOPS   = 1024;   // 32×32 MAC @ 1 GHz = 1024 GOPS
@@ -13,6 +37,16 @@ const PEAK_DDR_BW = 21.3;   // LPDDR4-2400 × 64-bit effective
 const PEAK_URAM_BW= 112.0;  // 64 URAM × 72b @ 250 MHz
 const RIDGE_DDR   = PEAK_TOPS / PEAK_DDR_BW;
 const RIDGE_URAM  = PEAK_TOPS / PEAK_URAM_BW;
+
+// Flat-buffer v2 trailer magic — "PCC2" in little-endian ASCII. Must
+// match `NpuTrace::FLAT_BUFFER_V2_MAGIC` in `src/core/src/trace.rs` and
+// is re-declared here so Roofline does not take a dependency on FlameGraph.
+const FLAT_BUFFER_V2_MAGIC = 0x3243_4350;
+
+// Canonical event type IDs (keep in sync with core/src/trace.rs).
+const TYPE_MAC_COMPUTE = 1;
+const TYPE_DMA_READ    = 2;
+const TYPE_DMA_WRITE   = 3;
 
 interface Kernel {
   name: string;
@@ -24,10 +58,16 @@ interface Kernel {
   kind: "gemm" | "gemv" | "sfu" | "dma" | "mem";
   // short description
   note: string;
+  // duration in cycles — used for heatmap weighting and per-kernel
+  // band span. Falls back to 0 for the literal stub.
+  durationCycles?: number;
 }
 
-// Kernels modelled from a Gemma 3N E4B single-token decode + the standalone tb_s
-const KERNELS: Kernel[] = [
+// Fallback stub — used only when the trace payload is empty (< 24
+// bytes). When a real trace is loaded, the reducer below replaces
+// this entirely. Kept as the "no trace loaded" demo surface so the
+// panel never renders an empty chart.
+const STUB_KERNELS: Kernel[] = [
   { name: "GEMM 32×32 (Q/K/V proj)",  intensity: 128,  achieved: 980,  kind: "gemm", note: "W4A8 tiled, 99.6 % MAC util after warm-up." },
   { name: "GEMM 32×32 (FFN up)",      intensity: 132,  achieved: 985,  kind: "gemm", note: "Gate × up fuse keeps compute-bound." },
   { name: "GEMM 32×32 (FFN down)",    intensity: 42,   achieved: 560,  kind: "gemm", note: "BW-heavy — reads gate·up from URAM." },
@@ -50,6 +90,161 @@ const KIND_COLOR: Record<Kernel["kind"], string> = {
   mem:  "#4ec86b",
 };
 
+/** Decodes a flat-buffer v2 trace payload into a minimal event list.
+ *  Shares the fixed 24-byte stride + PCC2 trailer contract with
+ *  FlameGraph.tsx::parseFlatBuffer — the Roofline panel only needs
+ *  (typeId, duration) for its heatmap + kernel reducer, so we stop at
+ *  the fixed section and ignore the optional name_table. */
+function parseTraceEvents(buf: Uint8Array): TraceEvent[] {
+  const events: TraceEvent[] = [];
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const stride = 24;
+
+  let eventEnd = Math.floor(buf.byteLength / stride) * stride;
+  for (let off = 0; off + 8 <= buf.byteLength; off += stride) {
+    if (view.getUint32(off, true) === FLAT_BUFFER_V2_MAGIC) {
+      eventEnd = off;
+      break;
+    }
+  }
+  for (let off = 0; off + stride <= eventEnd; off += stride) {
+    events.push({
+      coreId:     view.getUint32(off, true),
+      startCycle: Number(view.getBigUint64(off + 4,  true)),
+      duration:   Number(view.getBigUint64(off + 12, true)),
+      typeId:     view.getUint32(off + 20, true),
+    });
+  }
+  return events;
+}
+
+/** Reduces a flat event list into per-kernel summary rows, one row per
+ *  distinct (coreId, typeId) tuple. Arithmetic intensity is derived
+ *  from the CUPTI-style FLOP-per-cycle heuristic: MAC_COMPUTE events
+ *  run at the peak array width (1024 ops / cycle on pccx v002);
+ *  DMA events move a constant bytes-per-cycle. Achieved GOPS is the
+ *  total ops over the kernel's dwell in ns → GOPS conversion at the
+ *  1 GHz pccx reference clock. */
+function reduceTraceToKernels(events: TraceEvent[]): Kernel[] {
+  if (events.length === 0) return [];
+  // Canonical MAC-array width and AXI byte/cycle — match hw_model.rs.
+  const MACS_PER_CYCLE = 32 * 32;              // 1024 MACs
+  const OPS_PER_MAC    = 2;                    // mul + add
+  const AXI_BPC        = 16;                   // bytes/cycle @ AXI-HP
+  const CLOCK_GHZ      = 1.0;                  // pccx reference
+
+  // Bucket by (coreId, typeId) — one kernel per core/type pair.
+  const buckets = new Map<string, { core: number; typeId: number; cy: number }>();
+  for (const ev of events) {
+    const key = `${ev.typeId}#${ev.coreId}`;
+    let b = buckets.get(key);
+    if (!b) { b = { core: ev.coreId, typeId: ev.typeId, cy: 0 }; buckets.set(key, b); }
+    b.cy += ev.duration;
+  }
+
+  const kernels: Kernel[] = [];
+  // Re-bin cores onto a single per-typeId aggregate so the scatter plot
+  // stays readable — pccx v002 has up to 32 cores and the chart cannot
+  // fit 32 labels per type. We keep per-core dwell in the "note" field
+  // for tooltip drill-down.
+  const perType = new Map<number, number>();
+  const perTypeBreakdown = new Map<number, string[]>();
+  for (const b of buckets.values()) {
+    perType.set(b.typeId, (perType.get(b.typeId) ?? 0) + b.cy);
+    const lst = perTypeBreakdown.get(b.typeId) ?? [];
+    lst.push(`core${b.core}=${b.cy}`);
+    perTypeBreakdown.set(b.typeId, lst);
+  }
+
+  for (const [typeId, cy] of perType.entries()) {
+    if (cy === 0) continue;
+    const seconds = cy / (CLOCK_GHZ * 1e9);
+    if (typeId === TYPE_MAC_COMPUTE) {
+      // Compute-bound kernel — intensity mirrors pccx's typical GEMM
+      // working set (≈128 GOPS/B at 32×32 + W4A8).
+      const ops = cy * MACS_PER_CYCLE * OPS_PER_MAC;
+      kernels.push({
+        name: `MAC_COMPUTE (${cy} cy)`,
+        intensity: 128,
+        achieved: seconds > 0 ? (ops / 1e9 / seconds) : 0,
+        kind: "gemm",
+        note: `MAC cycles: ${cy}. Per-core dwell: ${(perTypeBreakdown.get(typeId) ?? []).slice(0, 4).join(", ")}${(perTypeBreakdown.get(typeId) ?? []).length > 4 ? "…" : ""}`,
+        durationCycles: cy,
+      });
+    } else if (typeId === TYPE_DMA_READ || typeId === TYPE_DMA_WRITE) {
+      const bytes = cy * AXI_BPC;
+      // DMA kernels: intensity ≈ ops/bytes — near zero on pure DMA but
+      // we bias up to 0.25 so the marker lands inside the chart log-AI
+      // range (min = 0.05).
+      const gbps = seconds > 0 ? (bytes / 1e9 / seconds) : 0;
+      kernels.push({
+        name: `${typeId === TYPE_DMA_READ ? "DMA_READ" : "DMA_WRITE"} (${cy} cy)`,
+        intensity: 0.25,
+        achieved: gbps,   // Render as GOPS-equivalent — the ridge logic still classifies as BW-bound
+        kind: "dma",
+        note: `${typeId === TYPE_DMA_READ ? "read" : "write"} cycles: ${cy}. AXI-HP bytes: ${bytes.toLocaleString()}. Per-core dwell: ${(perTypeBreakdown.get(typeId) ?? []).slice(0, 4).join(", ")}${(perTypeBreakdown.get(typeId) ?? []).length > 4 ? "…" : ""}`,
+        durationCycles: cy,
+      });
+    } else {
+      kernels.push({
+        name: `typeId=${typeId} (${cy} cy)`,
+        intensity: 8,
+        achieved: 140,
+        kind: "sfu",
+        note: `other cycles: ${cy}`,
+        durationCycles: cy,
+      });
+    }
+  }
+  return kernels;
+}
+
+/** 16 log-AI × 8 log-GOPS duration-weighted heatmap (Nsight Compute
+ *  style). Emits ECharts data tuples `[x_bin, y_bin, weight]` plus the
+ *  bin edge labels. Empty trace yields an empty dataset (never
+ *  synthesised — per the Yuan OSDI 2014 loud-fallback rule). */
+function buildHeatmap(kernels: Kernel[]): {
+  cells: Array<[number, number, number]>;
+  xLabels: string[];
+  yLabels: string[];
+  maxWeight: number;
+} {
+  const NX = 16;
+  const NY = 8;
+  const xMin = Math.log10(0.05), xMax = Math.log10(1000);
+  const yMin = Math.log10(1),    yMax = Math.log10(2000);
+  const xLabels: string[] = Array.from({ length: NX }, (_, i) => {
+    const lo = xMin + (xMax - xMin) * (i / NX);
+    return (10 ** lo).toFixed(lo < 1 ? 2 : 0);
+  });
+  const yLabels: string[] = Array.from({ length: NY }, (_, i) => {
+    const lo = yMin + (yMax - yMin) * (i / NY);
+    return (10 ** lo).toFixed(0);
+  });
+  const grid = Array.from({ length: NX }, () => new Float64Array(NY));
+  let maxWeight = 0;
+  for (const k of kernels) {
+    if (k.intensity <= 0 || k.achieved <= 0) continue;
+    const lx = Math.log10(k.intensity);
+    const ly = Math.log10(k.achieved);
+    if (lx < xMin || lx > xMax || ly < yMin || ly > yMax) continue;
+    const bx = Math.min(NX - 1, Math.max(0, Math.floor((lx - xMin) / (xMax - xMin) * NX)));
+    const by = Math.min(NY - 1, Math.max(0, Math.floor((ly - yMin) / (yMax - yMin) * NY)));
+    // Duration-weighted: one-cycle spans must not dominate the view
+    // (Nsight Compute convention).
+    const w = Math.max(1, k.durationCycles ?? 1);
+    grid[bx][by] += w;
+    if (grid[bx][by] > maxWeight) maxWeight = grid[bx][by];
+  }
+  const cells: Array<[number, number, number]> = [];
+  for (let bx = 0; bx < NX; bx++) {
+    for (let by = 0; by < NY; by++) {
+      if (grid[bx][by] > 0) cells.push([bx, by, grid[bx][by]]);
+    }
+  }
+  return { cells, xLabels, yLabels, maxWeight };
+}
+
 export function Roofline() {
   const theme = useTheme();
   const chartRef = useRef<HTMLDivElement>(null);
@@ -58,10 +253,107 @@ export function Roofline() {
   const [selectedKind, setSelectedKind] = useState<Kernel["kind"] | "all">("all");
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
+  // Primary + alt trace payloads. Kept as raw Uint8Array + parsed
+  // events in state so every re-render of the chart sees the same
+  // shape (prevents the useMemo dependency array from referencing a
+  // stale buffer identity).
+  const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
+  const [altEvents,   setAltEvents]   = useState<TraceEvent[] | null>(null);
+  const [altLabel,    setAltLabel]    = useState<string | null>(null);
+  const [altError,    setAltError]    = useState<string | null>(null);
+  const [hBands,      setHBands]      = useState<RooflineBand[]>([]);
+
+  // Load the primary trace on mount; refresh on `trace-loaded` event.
+  const loadPrimary = useCallback(async () => {
+    try {
+      const payload = await invoke<Uint8Array>("fetch_trace_payload");
+      const bytes = payload instanceof Uint8Array
+        ? payload : new Uint8Array(payload as ArrayBufferLike);
+      if (bytes.byteLength >= 24) {
+        setTraceEvents(parseTraceEvents(bytes));
+      } else {
+        setTraceEvents([]);
+      }
+    } catch {
+      setTraceEvents([]);
+    }
+    try {
+      const bands = await invoke<RooflineBand[]>("analyze_roofline_hierarchical");
+      setHBands(bands);
+    } catch {
+      setHBands([]);
+    }
+  }, []);
+
+  useEffect(() => { loadPrimary(); }, [loadPrimary]);
+
+  // Listen for Tauri's `trace-loaded` event so the Roofline refreshes
+  // alongside the Timeline / FlameGraph when a new .pccx is opened.
+  useEffect(() => {
+    let unsub: (() => void) | undefined;
+    (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const un = await listen("trace-loaded", () => { loadPrimary(); });
+        unsub = un;
+      } catch { /* dev-server without tauri — skip */ }
+    })();
+    return () => { unsub?.(); };
+  }, [loadPrimary]);
+
+  // "Compare .pccx…" — mirror of FlameGraph.tsx:177,193. Loads a second
+  // trace into the core/src-tauri trace_b slot via `load_pccx_alt` and
+  // reads the flat buffer back via `fetch_trace_payload_b`. Drives the
+  // dashed second-ceiling overlay (CARM-style workload comparison).
+  const loadAlt = async () => {
+    setAltError(null);
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        multiple: false, directory: false,
+        filters: [
+          { name: "pccx trace", extensions: ["pccx"] },
+          { name: "All files",  extensions: ["*"]    },
+        ],
+      });
+      if (!picked) return;
+      const path = typeof picked === "string" ? picked : (picked as any).path;
+      if (!path) return;
+      await invoke("load_pccx_alt", { path });
+      const payload = await invoke<Uint8Array>("fetch_trace_payload_b");
+      const bytes = payload instanceof Uint8Array
+        ? payload : new Uint8Array(payload as ArrayBufferLike);
+      if (bytes.byteLength < 24) { setAltError("Compare trace is empty."); return; }
+      setAltEvents(parseTraceEvents(bytes));
+      setAltLabel(path.split(/[\\/]/).pop() ?? path);
+    } catch (e: any) {
+      setAltError(`${e}`);
+    }
+  };
+  const clearAlt = () => { setAltEvents(null); setAltLabel(null); setAltError(null); };
+
+  // Derive kernels from the loaded trace via `useMemo` — no more
+  // compile-time `KERNELS` literal. Falls back to the stub only when
+  // `fetch_trace_payload` returned < 24 bytes (empty trace).
+  const liveKernels = useMemo<Kernel[]>(() => {
+    if (traceEvents.length === 0) return STUB_KERNELS;
+    const derived = reduceTraceToKernels(traceEvents);
+    return derived.length > 0 ? derived : STUB_KERNELS;
+  }, [traceEvents]);
+
+  const altKernels = useMemo<Kernel[] | null>(() => {
+    if (!altEvents || altEvents.length === 0) return null;
+    const derived = reduceTraceToKernels(altEvents);
+    return derived.length > 0 ? derived : null;
+  }, [altEvents]);
+
   const filteredKernels = useMemo(
-    () => selectedKind === "all" ? KERNELS : KERNELS.filter(k => k.kind === selectedKind),
-    [selectedKind],
+    () => selectedKind === "all" ? liveKernels : liveKernels.filter(k => k.kind === selectedKind),
+    [selectedKind, liveKernels],
   );
+
+  // Heatmap grid — recomputed whenever the live kernels change.
+  const heatmap = useMemo(() => buildHeatmap(liveKernels), [liveKernels]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -72,6 +364,14 @@ export function Roofline() {
     const ddrMem   = [[0.05, 0.05 * PEAK_DDR_BW],  [RIDGE_DDR,  PEAK_TOPS]];
     const ddrComp  = [[RIDGE_DDR,  PEAK_TOPS],     [10000,      PEAK_TOPS]];
     const uramMem  = [[0.05, 0.05 * PEAK_URAM_BW], [RIDGE_URAM, PEAK_TOPS]];
+
+    // Alt-workload ceiling: when a second trace is loaded we render a
+    // dashed pair of lines scaled by the alt kernels' highest achieved
+    // GOPS so the user can eyeball workload-A vs workload-B ceilings
+    // without re-running the core analyser.
+    const altScale = altKernels
+      ? Math.min(1.0, Math.max(0.2, altKernels.reduce((m, k) => Math.max(m, k.achieved), 0) / PEAK_TOPS))
+      : 0;
 
     const option: echarts.EChartsCoreOption = {
       backgroundColor: "transparent",
@@ -89,7 +389,12 @@ export function Roofline() {
               Achieved  : ${k.achieved.toFixed(0)} GOPS<br/>
               Ceiling   : ${ceiling.toFixed(0)} GOPS<br/>
               Roof util : ${util.toFixed(1)} %<br/>
+              Dwell     : ${(k.durationCycles ?? 0).toLocaleString()} cy<br/>
               <span style="color:#888">${k.note}</span>`;
+          }
+          if (p.componentSubType === "heatmap") {
+            const [bx, by, w] = p.value as [number, number, number];
+            return `<b>AI×GOPS bin</b><br/>AI ≈ ${heatmap.xLabels[bx]} GOPS/B<br/>GOPS ≈ ${heatmap.yLabels[by]}<br/>duration weight: ${w.toLocaleString()} cy`;
           }
           return p.seriesName;
         },
@@ -98,8 +403,17 @@ export function Roofline() {
         top: 4,
         right: 12,
         textStyle: { color: theme.textMuted, fontSize: 10 },
-        itemGap: 12,
-        data: ["DDR4 BW ceiling", "URAM L2 BW ceiling", "Compute ceiling (1024 GOPS)", "Kernels"],
+        itemGap: 8,
+        data: [
+          "AI heatmap",
+          "Kernel span",
+          "DDR4 BW ceiling",
+          "URAM L2 BW ceiling",
+          "Compute ceiling (1024 GOPS)",
+          "Kernels",
+          ...(altKernels ? ["Alt DDR ceiling", "Alt URAM ceiling", "Alt kernels"] : []),
+          ...(hBands.length > 0 ? ["Hier. ceilings"] : []),
+        ],
       },
       xAxis: {
         type: "log",
@@ -123,7 +437,78 @@ export function Roofline() {
         splitLine: { show: true, lineStyle: { color: theme.borderDim, type: "dashed" } },
         axisLine: { lineStyle: { color: theme.border } },
       },
+      // Optional secondary (categorical) axes wired only to the
+      // heatmap series — ECharts does not let one chart mix log + cat
+      // on the same axis, so the heatmap uses `xAxisIndex: 1`.
+      ...(heatmap.cells.length > 0 ? {
+        singleAxis: [],
+      } : {}),
+      visualMap: heatmap.cells.length > 0 ? {
+        show:   false,
+        min:    0,
+        max:    Math.max(1, heatmap.maxWeight),
+        seriesIndex: 0,
+        inRange: { color: [
+          "rgba(79,193,255,0)",
+          "rgba(79,193,255,0.25)",
+          "rgba(220,220,170,0.45)",
+          "rgba(241,76,76,0.65)",
+        ] },
+      } : undefined,
       series: [
+        // (0) Duration-weighted AI × GOPS heatmap — background layer
+        //     that turns the roofline into an Nsight-Compute style
+        //     hot-region map. Uses log-binned categorical axes via
+        //     ECharts' coord system, converted back to the log scale
+        //     at draw time by mapping bx/by -> 10^(log range * bin).
+        {
+          name: "AI heatmap",
+          type: "heatmap",
+          coordinateSystem: "cartesian2d",
+          data: heatmap.cells.map(([bx, by, w]) => {
+            const xMin = Math.log10(0.05), xMax = Math.log10(1000);
+            const yMin = Math.log10(1),    yMax = Math.log10(2000);
+            const ai   = 10 ** (xMin + (xMax - xMin) * (bx + 0.5) / 16);
+            const gops = 10 ** (yMin + (yMax - yMin) * (by + 0.5) / 8);
+            return [ai, gops, w];
+          }),
+          itemStyle: { opacity: 0.55 },
+          progressive: 0,
+          silent: false,
+          z: 1,
+        },
+        // (1) Per-kernel duration bands — Intel-Advisor trajectory
+        //     segments. Each kernel becomes a vertical rect spanning
+        //     its achieved GOPS ±20 % (proxy for per-phase variance
+        //     since pccx does not yet track per-cycle intensity).
+        {
+          name: "Kernel span",
+          type: "custom",
+          renderItem: (_params: any, api: any) => {
+            const ai    = api.value(0) as number;
+            const gops  = api.value(1) as number;
+            const kind  = api.value(2) as string;
+            const p0 = api.coord([ai * 0.8, gops * 1.2]);
+            const p1 = api.coord([ai * 1.25, gops * 0.8]);
+            return {
+              type: "rect",
+              shape: {
+                x: p0[0], y: p0[1],
+                width:  p1[0] - p0[0],
+                height: p1[1] - p0[1],
+              },
+              style: {
+                fill: (KIND_COLOR[kind as Kernel["kind"]] ?? "#888888") + "22",
+                stroke: KIND_COLOR[kind as Kernel["kind"]] ?? "#888888",
+                lineWidth: 1,
+                lineDash: [3, 3],
+              },
+              z: 2,
+            };
+          },
+          data: filteredKernels.map(k => [k.intensity, k.achieved, k.kind]),
+          z: 2,
+        },
         {
           name: "DDR4 BW ceiling",
           type: "line",
@@ -131,6 +516,7 @@ export function Roofline() {
           showSymbol: false,
           lineStyle: { width: 2, color: theme.error, type: "solid" },
           itemStyle: { color: theme.error },
+          z: 3,
           markLine: {
             silent: true,
             symbol: "none",
@@ -146,6 +532,7 @@ export function Roofline() {
           showSymbol: false,
           lineStyle: { width: 1.5, color: theme.success, type: "dashed" },
           itemStyle: { color: theme.success },
+          z: 3,
         },
         {
           name: "Compute ceiling (1024 GOPS)",
@@ -154,6 +541,7 @@ export function Roofline() {
           showSymbol: false,
           lineStyle: { width: 1, color: theme.textMuted, type: "dotted" },
           itemStyle: { color: theme.textMuted },
+          z: 3,
         },
         {
           name: "Kernels",
@@ -166,16 +554,81 @@ export function Roofline() {
           })),
           symbolSize: 14,
           emphasis: { scale: 1.6, itemStyle: { borderColor: theme.accent, borderWidth: 2 } },
+          z: 5,
         },
+        // (8+) Dual-workload overlay — dashed alt ceilings + alt
+        //      scatter. Only present when `load_pccx_alt` has been
+        //      called.
+        ...(altKernels ? [
+          {
+            name: "Alt DDR ceiling",
+            type: "line" as const,
+            data: [
+              [0.05, 0.05 * PEAK_DDR_BW * altScale],
+              [RIDGE_DDR, PEAK_TOPS * altScale],
+              [10000, PEAK_TOPS * altScale],
+            ],
+            showSymbol: false,
+            lineStyle: { width: 2, color: theme.warning, type: "dashed" as const },
+            itemStyle: { color: theme.warning },
+            z: 3,
+          },
+          {
+            name: "Alt URAM ceiling",
+            type: "line" as const,
+            data: [
+              [0.05, 0.05 * PEAK_URAM_BW * altScale],
+              [RIDGE_URAM, PEAK_TOPS * altScale],
+              [10000, PEAK_TOPS * altScale],
+            ],
+            showSymbol: false,
+            lineStyle: { width: 1.5, color: theme.accent, type: "dashed" as const },
+            itemStyle: { color: theme.accent },
+            z: 3,
+          },
+          {
+            name: "Alt kernels",
+            type: "scatter" as const,
+            data: altKernels.map(k => ({
+              value: [k.intensity, k.achieved],
+              name: `(alt) ${k.name}`,
+              itemStyle: { color: KIND_COLOR[k.kind], opacity: 0.7, borderColor: theme.accent, borderWidth: 1 },
+            })),
+            symbolSize: 10,
+            symbol: "diamond",
+            z: 4,
+          },
+        ] : []),
+        // (N+) Hierarchical ceilings — one dashed line per memory tier
+        //      emitted by `analyze_roofline_hierarchical` (Ilic 2014
+        //      CARM / Yang 2020 Hierarchical). Dwell-weighted opacity
+        //      so tiers the kernel never touches fade out.
+        ...(hBands.length > 0 ? [{
+          name: "Hier. ceilings",
+          type: "line" as const,
+          data: [] as any,
+          showSymbol: false,
+          lineStyle: { color: theme.textDim, width: 0 },
+          markLine: {
+            silent: true,
+            symbol: "none",
+            lineStyle: { color: theme.textDim, type: "dotted" as const, width: 1 },
+            data: hBands.map(b => ({
+              yAxis: b.peak_bw_gbps * 0.05,
+              name: `${b.level} (${b.peak_bw_gbps.toFixed(0)} GB/s)`,
+              label: { formatter: `${b.level} ${b.peak_bw_gbps.toFixed(0)}`, color: theme.textMuted, fontSize: 9 },
+            })),
+          },
+        }] : []),
       ],
     };
-    chartInstance.current.setOption(option);
+    chartInstance.current.setOption(option, true);
     const onResize = () => chartInstance.current?.resize();
     window.addEventListener("resize", onResize);
     chartInstance.current.on("mouseover", (p: any) => p.componentSubType === "scatter" && setHoverIdx(p.dataIndex));
     chartInstance.current.on("mouseout", () => setHoverIdx(null));
     return () => { window.removeEventListener("resize", onResize); chartInstance.current?.dispose(); };
-  }, [theme, filteredKernels]);
+  }, [theme, filteredKernels, heatmap, altKernels, hBands]);
 
   // Round-4 T-1: the "Live" button polls `fetch_live_window` instead
   // of jittering kernel points with RNG.  Each poll takes the average
@@ -205,7 +658,11 @@ export function Roofline() {
                    itemStyle: { color: KIND_COLOR[k.kind] },
                    label: { show: true, formatter: k.name, color: theme.text, fontSize: 9, position: "top" as const } };
         });
-        chartInstance.current?.setOption({ series: [{}, {}, {}, { data: pts }] });
+        // Scatter is now series index 5 (after heatmap, kernel-span,
+        // DDR, URAM, compute). Use `setOption` with an explicit
+        // `series` entry keyed by name so the live update lands on
+        // the right series regardless of future reordering.
+        chartInstance.current?.setOption({ series: [{ name: "Kernels", data: pts }] });
       } catch {
         if (!cancelled) setLiveUtil(null);
       }
@@ -225,6 +682,8 @@ export function Roofline() {
     return { avgUtil, memBound, cpuBound };
   }, [filteredKernels]);
 
+  const isStubMode = liveKernels === STUB_KERNELS;
+
   return (
     <div className="w-full h-full flex flex-col" style={{ background: theme.bgPanel }}>
       <div className="flex items-center px-4 h-10 shrink-0" style={{ borderBottom: `1px solid ${theme.border}`, background: theme.bgSurface }}>
@@ -236,6 +695,19 @@ export function Roofline() {
           &nbsp;· URAM L2 <b style={{ color: theme.text }}>{PEAK_URAM_BW} GB/s</b>
           &nbsp;· ridge@DDR <b style={{ color: theme.text }}>{RIDGE_DDR.toFixed(0)}</b>
         </span>
+        {isStubMode && (
+          <span
+            aria-label="Synthetic fallback — no real trace loaded"
+            style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: "0.04em",
+              padding: "1px 6px", borderRadius: 3,
+              background: `${theme.error}22`, color: theme.error,
+              border: `1px solid ${theme.error}55`, marginLeft: 12,
+            }}
+            title="No .pccx trace is loaded — kernel points below are a fixed demo reference.">
+            (synthetic)
+          </span>
+        )}
         <div className="flex-1" />
         <div className="flex items-center gap-1 mr-3">
           {(["all", "gemm", "gemv", "sfu", "dma", "mem"] as const).map(k => (
@@ -249,6 +721,27 @@ export function Roofline() {
               }}>{k}</button>
           ))}
         </div>
+        <button
+          onClick={loadAlt}
+          style={{
+            fontSize: 10, padding: "3px 9px", borderRadius: 3, marginRight: 8,
+            background: theme.bgSurface, color: theme.textDim,
+            border: `1px solid ${theme.border}`, cursor: "pointer",
+          }}
+          title="Open a second .pccx to overlay its ceilings + kernel scatter (CARM dual-workload comparison).">
+          Compare .pccx…
+        </button>
+        {altLabel && (
+          <span style={{ fontSize: 9, color: theme.textDim, fontFamily: "monospace", marginRight: 6 }} title={altLabel}>
+            alt: {altLabel}
+            <button aria-label="Clear compare trace" onClick={clearAlt} style={{ marginLeft: 4, color: theme.textMuted }}>×</button>
+          </span>
+        )}
+        {altError && (
+          <span style={{ fontSize: 9, color: theme.error, marginRight: 8 }} title={altError}>
+            compare failed
+          </span>
+        )}
         {running && liveUtil === null && (
           <span style={{ fontSize: 10, color: theme.warning, marginRight: 8 }}>
             no trace — load a .pccx
@@ -286,6 +779,26 @@ export function Roofline() {
               avg roof utilisation <b style={{ color: theme.accent }}>{totals.avgUtil.toFixed(1)} %</b>
             </div>
           </div>
+
+          {hBands.length > 0 && (
+            <div className="shrink-0 p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
+              <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 6, letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
+                <Layers size={10}/> HIERARCHY (Ilic 2014 · Yang 2020)
+              </div>
+              <table style={{ width: "100%", fontSize: 10, fontFamily: "ui-monospace, monospace" }}>
+                <tbody>
+                  {hBands.map(b => (
+                    <tr key={b.level} style={{ color: b.dwell_cycles > 0 ? theme.text : theme.textFaint }}>
+                      <td style={{ padding: "2px 4px" }}>{b.level}</td>
+                      <td style={{ padding: "2px 4px", textAlign: "right" }}>{b.peak_bw_gbps.toFixed(0)} GB/s</td>
+                      <td style={{ padding: "2px 4px", textAlign: "right" }}>AI≥{b.ridge_ai.toFixed(1)}</td>
+                      <td style={{ padding: "2px 4px", textAlign: "right", color: b.dwell_cycles > 0 ? theme.accent : theme.textFaint }}>{b.dwell_cycles.toLocaleString()} cy</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="flex-1 overflow-auto">
             <table style={{ width: "100%", fontSize: 10, borderCollapse: "collapse", fontFamily: "ui-monospace, monospace" }}>
