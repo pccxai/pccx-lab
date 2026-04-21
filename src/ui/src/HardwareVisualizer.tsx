@@ -483,7 +483,11 @@ export function HardwareVisualizer() {
       ctx.fillStyle = dotColor;
       ctx.beginPath(); ctx.arc(p.x + p.w - 10, p.y + 9, 4, 0, Math.PI * 2); ctx.fill();
       if (state.state === "busy") {
-        const pulse = 0.5 + 0.5 * Math.sin(cycle * 0.2);
+        // Round-5 T-3: ornamental — W3C WAAPI pattern.  Gated on
+        // `playing` so a paused timeline shows a steady busy-dot
+        // instead of a decorative breathing glow tied to real cycle
+        // state (Yuan OSDI 2014 honest-idle).
+        const pulse = playing ? 0.5 + 0.5 * Math.sin(cycle * 0.2) : 1.0;
         ctx.globalAlpha = pulse * 0.4;
         ctx.beginPath(); ctx.arc(p.x + p.w - 10, p.y + 9, 7, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1;
@@ -502,7 +506,7 @@ export function HardwareVisualizer() {
     ctx.fillStyle = theme.textMuted;
     ctx.font = "10px ui-monospace, monospace";
     ctx.fillText(`cycle ${cycle}`, rect.width - 90, rect.height - 10);
-  }, [cycle, theme, selected, flat, layout, traceEvents]);
+  }, [cycle, theme, selected, flat, layout, traceEvents, playing]);
 
   return (
     <div className="w-full h-full flex flex-col" style={{ background: theme.bgPanel }}>

@@ -338,6 +338,15 @@ export function ReportBuilder() {
   const [reportTitle, setReportTitle] = useState("pccx NPU Performance Analysis Report");
   const [author, setAuthor]          = useState("pccx-lab v0.4.0");
 
+  // Round-5 T-3: live window feeds the utilisation grid with real
+  // mac_util numbers from `fetch_live_window`.  Empty vec ⇒ the
+  // "no trace" notice in PreviewSection.utilisation (Yuan OSDI 2014
+  // loud-fallback).  Core index is derived from the sample ordinal.
+  const { samples: liveSamples, hasTrace: liveHasTrace } = useLiveWindow();
+  const coreUtils = liveHasTrace
+    ? liveSamples.map((s, i) => ({ core_id: i, util_pct: s.mac_util * 100 }))
+    : [];
+
   useEffect(() => {
     (async () => {
       try {
@@ -478,7 +487,7 @@ export function ReportBuilder() {
           {/* Sections */}
           {enabledSections.map((sec, i) => (
             <div key={sec.id} style={{ marginBottom: 24, padding: 16, background: cardBg, border: `1px solid ${border}`, borderRadius: 8 }}>
-              <PreviewSection section={sec} data={traceData} />
+              <PreviewSection section={sec} data={{ ...traceData, coreUtils }} />
             </div>
           ))}
 
