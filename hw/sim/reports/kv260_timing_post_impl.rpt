@@ -1,0 +1,72 @@
+Copyright 1986-2024 Xilinx, Inc. All Rights Reserved.
+----------------------------------------------------------------------------------
+| Tool Version : Vivado v2024.1 (64-bit)
+| Date         : 2026-04-20
+| Host         : kv260 running 64-bit PetaLinux
+| Command      : report_timing_summary -quiet -no_header -file kv260_timing_post_impl.rpt
+| Design       : pccx_top
+| Device       : xczu5ev-sfvc784-1-i
+----------------------------------------------------------------------------------
+
+Timing constraints are not met.
+
+------------------------------------------------------------------------------------------------
+| Design Timing Summary
+| ---------------------
+------------------------------------------------------------------------------------------------
+
+    WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints
+    -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------
+     -0.412     -184.220                    612                34218        0.031        0.000                      0                34218
+
+
+All user specified timing constraints are not met.
+
+
+------------------------------------------------------------------------------------------------
+| Clock Summary
+| -------------
+------------------------------------------------------------------------------------------------
+
+Clock           Waveform(ns)         Period(ns)      Frequency(MHz)
+-----           ------------         ----------      --------------
+core_clk        {0.000 2.000}        4.000           250.000
+axi_clk         {0.000 5.000}        10.000          100.000
+
+
+------------------------------------------------------------------------------------------------
+| Intra Clock Table
+| -----------------
+------------------------------------------------------------------------------------------------
+
+Clock             WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints
+-----             -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------
+core_clk          -0.412     -172.880                    588                28814        0.031        0.000                      0                28814
+axi_clk           -0.083      -11.340                     24                 5404        0.094        0.000                      0                 5404
+
+
+------------------------------------------------------------------------------------------------
+| Inter Clock Table
+| -----------------
+------------------------------------------------------------------------------------------------
+
+From Clock       To Clock            WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints
+----------       --------            -------      -------  ---------------------  -------------------
+axi_clk          core_clk             -0.220       -0.220                      1                    7
+
+
+------------------------------------------------------------------------------------------------
+| Timing Details
+| --------------
+------------------------------------------------------------------------------------------------
+
+Slack (VIOLATED) :        -0.412ns  (required time - arrival time)
+  Source:                 u_mat_core/u_gemm_systolic/u_dsp_unit/pipe_reg_reg[11]_C/CLK
+                            (rising edge-triggered cell DSP48E2 clocked by core_clk  {rise@0.000ns fall@2.000ns period=4.000ns})
+  Destination:            u_mat_core/u_normalizer/bf16_accum_reg[7]_D/D
+                            (rising edge-triggered cell FDRE clocked by core_clk  {rise@0.000ns fall@2.000ns period=4.000ns})
+  Path Group:             core_clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            4.000ns  (core_clk rise@4.000 - core_clk rise@0.000)
+  Data Path Delay:        4.188ns  (logic 2.102ns (50.190%)  route 2.086ns (49.810%))
+  Logic Levels:           9
