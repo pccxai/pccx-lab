@@ -8,6 +8,7 @@ use pccx_core::roofline::{
     RooflineBand, RooflinePoint,
 };
 use pccx_core::live_window::{LiveSample, LiveWindow};
+use pccx_core::step_snapshot::{step_to_cycle as step_to_cycle_fn, RegisterSnapshot};
 use pccx_ai_copilot::{
     Extension, compress_context, generate_uvm_sequence,
     get_available_extensions, list_uvm_strategies as copilot_uvm_strategies,
@@ -490,6 +491,21 @@ fn fetch_live_window(
     Ok(LiveWindow::from_trace(trace, win).snapshot())
 }
 
+/// Round-6 T-1: returns the deterministic per-cycle `RegisterSnapshot`
+/// for a requested cycle so the Timeline / Waveform / HardwareVisualizer
+/// / FlameGraph cursor can surface register + MAC-array state at any
+/// integer clock. When no trace is loaded, returns the empty snapshot
+/// instead of an error so the UI always has a stable shape to render
+/// (Yuan OSDI 2014 loud-fallback convention, same as fetch_live_window).
+#[tauri::command]
+fn step_to_cycle(
+    cycle: u64,
+    state: State<'_, AppState>,
+) -> Result<RegisterSnapshot, String> {
+    let trace_guard = state.trace.lock().unwrap();
+    Ok(step_to_cycle_fn(trace_guard.as_ref(), cycle))
+}
+
 /// Lists every `.pccx` file under the sibling pccx-FPGA repo's
 /// `hw/sim/work/<tb>/` tree so the UI can present a dropdown of
 /// available traces without hard-coding paths.
@@ -674,6 +690,7 @@ pub fn run() {
             validate_isa_trace,
             list_api_calls,
             fetch_live_window,
+            step_to_cycle,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

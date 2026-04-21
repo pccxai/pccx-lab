@@ -23,6 +23,7 @@ pub mod isa_replay;
 pub mod api_ring;
 pub mod live_window;
 pub mod vivado_timing;
+pub mod step_snapshot;
 
 // ─── Convenience re-exports (public API surface) ──────────────────────────────
 pub use pccx_format::{PccxFile, PccxHeader, PccxError, ArchConfig, TraceConfig, PayloadConfig, fnv1a_64};
@@ -40,6 +41,7 @@ pub use vcd::{parse_vcd_file, WaveformDump, SignalMeta, VcdChange, VcdError};
 pub use vcd_writer::{write_vcd, write_vcd_to};
 pub use chrome_trace::{write_chrome_trace, write_chrome_trace_to};
 pub use live_window::{LiveSample, LiveWindow};
+pub use step_snapshot::{step_to_cycle, CoreState, RegisterSnapshot};
 pub use vivado_timing::{
     parse_timing_report, parse_worst_endpoint,
     TimingReport, ClockDomain, FailingPath, ParseError as TimingParseError,

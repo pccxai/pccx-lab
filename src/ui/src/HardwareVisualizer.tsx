@@ -3,6 +3,7 @@ import { useTheme } from "./ThemeContext";
 import { Play, Pause, SkipForward, SkipBack, RotateCcw, Cpu, ChevronRight, ChevronDown, Search } from "lucide-react";
 import ELK, { type ElkNode, type ElkExtendedEdge } from "elkjs/lib/elk.bundled.js";
 import { invoke } from "@tauri-apps/api/core";
+import { useCycleCursor, attachCycleKeybindings, useGoToCycleInput } from "./hooks/useCycleCursor";
 
 /* ─────────────────────────────────────────────────────────────────────────
  * pccx v002 KV260 module hierarchy.
@@ -301,25 +302,76 @@ export function HardwareVisualizer() {
   const theme = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef    = useRef<HTMLCanvasElement>(null);
+  const rootRef      = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ NPU_Top: true, MAT_CORE: true, MEM: true });
   const [selected, setSelected] = useState<string>("MAT_CORE");
   const [filter,   setFilter]   = useState("");
-  const [cycle,    setCycle]    = useState(500);
+  // ─── Round-6 T-1: unified cycle cursor ─────────────────────────────
+  // Single source of truth shared with Timeline / Waveform / FlameGraph
+  // so "go to cycle N" and Arrow-key stepping stay in lock-step across
+  // every time-domain panel. Keyboard bindings (ArrowLeft/Right,
+  // Shift+Arrow, Ctrl+G / g, ., ,) are attached further down via
+  // `attachCycleKeybindings` on `rootRef`.
+  const cursor = useCycleCursor();
+  const cycle  = cursor.cycle;
+  const setCycle = cursor.setCycle;
   const [playing,  setPlaying]  = useState(true);
   const [speed,    setSpeed]    = useState(1);
+  // Cycles-per-tick: 1 cycle at 1× speed, user-editable — replaces the
+  // old `Math.floor(4 * speed)` residue that made Shift-stepping drift.
+  const [cyclesPerTick, setCyclesPerTick] = useState(1);
   // ELK-computed node rectangles.  Populated on mount + on resize.
   const [layout, setLayout] = useState<Record<string, { x: number; y: number; w: number; h: number }>>({});
   // Trace events (drives edgeAlive); empty → edges fall back to cycle ranges.
   const [traceEvents, setTraceEvents] = useState<TraceEv[]>([]);
 
-  // Auto-advance
+  // Derive max cycle from the trace when present — fall back to 1024
+  // when the panel is still in onboarding / demo mode.  Also pushes
+  // into the shared `useCycleCursor` store so every other panel sees
+  // the same upper bound.
+  const maxCycle = useMemo(() => {
+    if (traceEvents.length === 0) return 1024;
+    let m = 0;
+    for (const ev of traceEvents) {
+      const end = ev.startCycle + ev.duration;
+      if (end > m) m = end;
+    }
+    return Math.max(m, 1);
+  }, [traceEvents]);
+
+  useEffect(() => {
+    cursor.setTotalCycles(maxCycle);
+  }, [maxCycle, cursor]);
+
+  // Stable ref to the current cycle — used inside setInterval so the
+  // interval closure doesn't have to depend on `cycle` (which would
+  // re-subscribe on every tick and leak callbacks).
+  const cycleRef = useRef(cycle);
+  useEffect(() => { cycleRef.current = cycle; }, [cycle]);
+
+  // Auto-advance — cycle-accurate: 1 cycle per tick at 1× speed,
+  // user-tunable via `cyclesPerTick` (≥ 1).  Shift-click on the
+  // SkipBack / SkipForward buttons jumps by 32 cycles (Verdi "big
+  // step" convention); plain clicks step by `cyclesPerTick`.
   useEffect(() => {
     if (!playing) return;
+    const step = Math.max(1, Math.floor(cyclesPerTick));
+    // 50 ms tick — the scheduling mechanism is T-3 territory; T-1
+    // just changes the VALUE semantics (1 cycle / tick at 1×).
     const id = setInterval(() => {
-      setCycle(c => (c + Math.floor(4 * speed)) % 1024);
+      const next = (cycleRef.current + Math.max(1, Math.round(step * speed))) % Math.max(1, maxCycle);
+      setCycle(next);
     }, 50);
     return () => clearInterval(id);
-  }, [playing, speed]);
+  }, [playing, speed, cyclesPerTick, maxCycle, setCycle]);
+
+  // Attach panel-scoped keyboard bindings for single-cycle control.
+  useEffect(() => {
+    return attachCycleKeybindings(rootRef.current, cursor);
+  }, [cursor]);
+
+  // Numeric "go to cycle N" input sharing the shared cursor's clamp.
+  const goTo = useGoToCycleInput(cursor);
 
   const flat = useMemo(() => {
     const out: { m: Module; depth: number }[] = [];
@@ -509,7 +561,7 @@ export function HardwareVisualizer() {
   }, [cycle, theme, selected, flat, layout, traceEvents, playing]);
 
   return (
-    <div className="w-full h-full flex flex-col" style={{ background: theme.bgPanel }}>
+    <div ref={rootRef} tabIndex={0} className="w-full h-full flex flex-col outline-none" style={{ background: theme.bgPanel }}>
       {/* Header */}
       <div className="flex items-center px-4 shrink-0 gap-3" style={{ height: 40, borderBottom: `1px solid ${theme.border}` }}>
         <Cpu size={16} style={{ color: theme.accent }} />
@@ -519,25 +571,60 @@ export function HardwareVisualizer() {
         </span>
         <div className="flex-1" />
         <div className="flex items-center gap-1 mr-3">
-          <button onClick={() => setCycle(c => Math.max(0, c - 32))} style={iconBtn(theme)}><SkipBack size={12}/></button>
+          <button
+            aria-label="Skip back one cycle (Shift-click: 32 cycles)"
+            title="Click: -1 cycle · Shift-click: -32 cycles · Arrow ← also steps"
+            onClick={(e) => setCycle(Math.max(0, cycle - (e.shiftKey ? 32 : 1)))}
+            style={iconBtn(theme)}><SkipBack size={12}/></button>
           <button onClick={() => setPlaying(p => !p)} style={{ ...iconBtn(theme), background: playing ? theme.warning : theme.success, color: "#fff" }}>
             {playing ? <Pause size={12}/> : <Play size={12}/>}
           </button>
-          <button onClick={() => setCycle(c => Math.min(1023, c + 32))} style={iconBtn(theme)}><SkipForward size={12}/></button>
+          <button
+            aria-label="Skip forward one cycle (Shift-click: 32 cycles)"
+            title="Click: +1 cycle · Shift-click: +32 cycles · Arrow → also steps"
+            onClick={(e) => setCycle(Math.min(maxCycle, cycle + (e.shiftKey ? 32 : 1)))}
+            style={iconBtn(theme)}><SkipForward size={12}/></button>
           <button onClick={() => { setCycle(0); setPlaying(false); }} style={iconBtn(theme)}><RotateCcw size={12}/></button>
           <select value={speed} onChange={e => setSpeed(Number(e.target.value))}
                   style={{ marginLeft: 6, fontSize: 10, padding: "2px 4px", background: theme.bgInput, border: `1px solid ${theme.border}`, color: theme.text, borderRadius: 3 }}>
             <option value={0.25}>0.25×</option><option value={0.5}>0.5×</option>
             <option value={1}>1×</option><option value={2}>2×</option><option value={4}>4×</option>
           </select>
+          <label style={{ fontSize: 9, color: theme.textMuted, marginLeft: 6, display: "inline-flex", alignItems: "center", gap: 4 }}
+                 title="Cycles advanced per auto-tick. 1 = honest single-clock stepping.">
+            cy/tick
+            <input
+              type="number" min={1} step={1} value={cyclesPerTick}
+              onChange={e => setCyclesPerTick(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+              style={{ width: 46, fontSize: 10, padding: "1px 4px", background: theme.bgInput, border: `1px solid ${theme.border}`, color: theme.text, borderRadius: 3 }}
+            />
+          </label>
+          <label style={{ fontSize: 9, color: theme.textMuted, marginLeft: 6, display: "inline-flex", alignItems: "center", gap: 4 }}
+                 title="Go to cycle N — Enter to commit. Ctrl+G or g opens a prompt from anywhere in this panel.">
+            go to
+            <input
+              type="number" min={0} max={maxCycle} placeholder={`0–${maxCycle}`}
+              value={goTo.value}
+              onChange={e => goTo.setValue(e.target.value)}
+              onKeyDown={goTo.onKeyDown}
+              onBlur={goTo.commit}
+              style={{ width: 70, fontSize: 10, padding: "1px 4px", background: theme.bgInput, border: `1px solid ${theme.border}`, color: theme.text, borderRadius: 3 }}
+            />
+          </label>
         </div>
       </div>
 
       {/* Scrubber */}
       <div className="px-4 py-2 shrink-0 flex items-center gap-3" style={{ borderBottom: `1px solid ${theme.border}`, background: theme.bgSurface }}>
-        <span style={{ fontSize: 10, color: theme.textMuted, fontFamily: "monospace", width: 80 }}>cyc {cycle.toString().padStart(4, "0")} / 1024</span>
-        <input type="range" min={0} max={1023} value={cycle} onChange={e => setCycle(Number(e.target.value))}
-               style={{ flex: 1, accentColor: theme.accent }}/>
+        <span style={{ fontSize: 10, color: theme.textMuted, fontFamily: "monospace", width: 100 }}>cyc {cycle.toString().padStart(4, "0")} / {maxCycle}</span>
+        <input
+          type="range" min={0} max={maxCycle} value={cycle}
+          // Shift held → step 1 cycle at a time (honest single-clock
+          // resolution).  Plain drag uses the `step` prop of 1 too,
+          // so every pixel resolves a cycle. Round-6 T-1 user directive.
+          step={1}
+          onChange={e => setCycle(Number(e.target.value))}
+          style={{ flex: 1, accentColor: theme.accent }}/>
         <span style={{ fontSize: 9, color: theme.textMuted }}>{(cycle / 1000).toFixed(3)} µs @ 1 GHz</span>
       </div>
 

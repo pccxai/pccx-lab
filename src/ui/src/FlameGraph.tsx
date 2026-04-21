@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTheme } from "./ThemeContext";
+import { useCycleCursor, attachCycleKeybindings, useGoToCycleInput } from "./hooks/useCycleCursor";
 
 interface Span {
   name: string;
@@ -140,9 +141,13 @@ export function FlameGraph() {
   const theme = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const [spans, setSpans] = useState<Span[]>([]);
   const [totalCycles, setTotalCycles] = useState(0);
   const [loading, setLoading] = useState(true);
+  // Round-6 T-1 — shared cycle cursor across every time-domain panel.
+  const cursor = useCycleCursor();
+  const goTo   = useGoToCycleInput(cursor);
   /** True when we fell through to the empty-state fallback (no trace
    * loaded).  Drives the toolbar `(synthetic)` badge so users never
    * mistake the placeholder for a real run. */
@@ -168,6 +173,16 @@ export function FlameGraph() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Round-6 T-1: publish our total cycles + attach panel-scoped key
+  // bindings for single-clock control.
+  useEffect(() => {
+    if (totalCycles > 0) cursor.setTotalCycles(totalCycles);
+  }, [totalCycles, cursor]);
+
+  useEffect(() => {
+    return attachCycleKeybindings(rootRef.current, cursor);
+  }, [cursor]);
 
   // Load a second run for side-by-side duration ratio colouring.
   // Real path: Tauri dialog → `load_pccx_alt` → `fetch_trace_payload_b`
@@ -529,9 +544,30 @@ export function FlameGraph() {
   }
 
   return (
-    <div className="w-full h-full flex flex-col relative" style={{ background: theme.bgPanel }}>
+    <div ref={rootRef} tabIndex={0} className="w-full h-full flex flex-col relative outline-none" style={{ background: theme.bgPanel }}>
       <div className="flex items-center px-3 gap-3 shrink-0" style={{ height: 30, borderBottom: `1px solid ${theme.border}` }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: theme.textMuted, letterSpacing: "0.05em" }}>FLAME GRAPH</span>
+        {/* Round-6 T-1: cycle cursor readout + numeric go-to-cycle */}
+        <span style={{ fontSize: 9, color: theme.textMuted, fontFamily: "monospace" }}>
+          cyc {cursor.cycle.toLocaleString()} / {Math.max(totalCycles, cursor.totalCycles).toLocaleString()}
+        </span>
+        <label style={{ fontSize: 9, color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}
+               title="Ctrl+G or g opens this prompt from anywhere in this panel.">
+          go to
+          <input
+            type="number" min={0} max={Math.max(totalCycles, cursor.totalCycles)}
+            placeholder={`0–${Math.max(totalCycles, cursor.totalCycles)}`}
+            value={goTo.value}
+            onChange={e => goTo.setValue(e.target.value)}
+            onKeyDown={goTo.onKeyDown}
+            onBlur={goTo.commit}
+            style={{
+              width: 70, height: 18, fontSize: 9, padding: "0 4px",
+              background: theme.bgSurface, color: theme.text,
+              border: `1px solid ${theme.border}`, borderRadius: 2, outline: "none",
+            }}
+          />
+        </label>
         {synthetic && (
           <span
             aria-label="Synthetic fallback — no real trace loaded"
@@ -622,6 +658,21 @@ export function FlameGraph() {
         onMouseMove={onMouseMove}
       >
         <canvas ref={canvasRef} className="absolute inset-0" />
+        {/* Round-6 T-1: vertical cursor line.  DOM overlay — stays
+            out of the canvas draw() body (T-3 territory).  */}
+        {(() => {
+          const c = cursor.cycle;
+          const { offset, cpp } = vp.current;
+          const pxW = containerRef.current?.clientWidth ?? 0;
+          const x   = (c - offset) / Math.max(cpp, 1e-9);
+          if (x < 0 || x > pxW) return null;
+          return (
+            <div aria-hidden className="absolute pointer-events-none"
+                 style={{ left: x, top: 0, bottom: 0, width: 1,
+                          background: theme.accent,
+                          boxShadow: `0 0 4px ${theme.accent}99` }} />
+          );
+        })()}
         {/* Empty-state overlay — rendered only when no trace is loaded.
             R-4 T-3 replaces the old Gemma 3N literal demo tree with an
             honest placeholder so users never mistake the fallback for

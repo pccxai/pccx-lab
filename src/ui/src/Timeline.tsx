@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTheme } from "./ThemeContext";
 import { useLiveWindow } from "./hooks/useLiveWindow";
+import { useCycleCursor, attachCycleKeybindings, useGoToCycleInput } from "./hooks/useCycleCursor";
 
 const EVENT_COLORS: Record<number, { fill: string; label: string }> = {
   0: { fill: "#555555", label: "Unknown"         },
@@ -39,6 +40,7 @@ export function Timeline() {
   const theme = useTheme();
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const containerRef  = useRef<HTMLDivElement>(null);
+  const rootRef       = useRef<HTMLDivElement>(null);
   const [events, setEvents]           = useState<ParsedEvent[]>([]);
   const [totalCycles, setTotalCycles] = useState(0);
   const [numCores, setNumCores]       = useState(32);
@@ -47,6 +49,13 @@ export function Timeline() {
   const [selectedEvent, setSelectedEvent] = useState<ParsedEvent | null>(null);
   const [selection, setSelection]     = useState<{ start: number; end: number } | null>(null);
   const [markers, setMarkers]         = useState<number[]>([]);
+  // Round-6 T-1: integer-cycle snap mode — when ON, the viewport's
+  // cycles-per-pixel clamps to ≥1 so one pixel never sub-samples the
+  // clock.  Also snaps cursor rounds to integer cycles. Default ON
+  // because the user directive #1 is "100% tiny timing analysis".
+  const [snapToCycle, setSnapToCycle] = useState(true);
+  const cursor = useCycleCursor();
+  const goTo   = useGoToCycleInput(cursor);
 
   const vp = useRef({ offset: 0, cpp: 1, dragging: false, lastX: 0, selStart: -1 });
 
@@ -115,6 +124,10 @@ export function Timeline() {
 
     // Initial load: demo fallback if no trace yet.
     void applyPayload(true);
+
+    // No-op placeholder — `totalCycles` is published through the
+    // shared cursor in a dedicated effect below so the snapshot stays
+    // in lock-step with the trace-loaded event listener.
 
     // Subscribe to trace-loaded events so the canvas picks up freshly
     // loaded .pccx files without a manual reload. Only available in the
@@ -350,13 +363,30 @@ export function Timeline() {
     return () => el.removeEventListener("wheel", onWheel);
   }, [onWheel]);
 
+  // Round-6 T-1: publish our trace bound + attach panel-scoped key
+  // bindings (ArrowLeft/Right, Shift+Arrow, Ctrl+G, g, ., ,).
+  useEffect(() => {
+    if (totalCycles > 0) cursor.setTotalCycles(totalCycles);
+  }, [totalCycles, cursor]);
+
+  useEffect(() => {
+    return attachCycleKeybindings(rootRef.current, cursor);
+  }, [cursor]);
+
+  // Snap cpp to an integer cycles/pixel when `snapToCycle` is ON — the
+  // user-directive promise is "1 cycle per pixel without losing
+  // markers". Math only, does NOT mutate draw() internals (T-3 territory).
+  useEffect(() => {
+    if (snapToCycle && vp.current.cpp < 1) vp.current.cpp = 1;
+  }, [snapToCycle, cursor.cycle]);
+
   const fitAll = () => { if (!canvasRef.current || totalCycles === 0) return; vp.current.offset = 0; vp.current.cpp = totalCycles / (canvasRef.current.clientWidth - LANE_LABEL_W); setSelection(null); draw(); };
   const zoomToSelection = () => { if (!selection || !canvasRef.current) return; const s = Math.min(selection.start, selection.end); const e = Math.max(selection.start, selection.end); vp.current.offset = s; vp.current.cpp = (e - s) / (canvasRef.current.clientWidth - LANE_LABEL_W); draw(); };
 
   const btnStyle: React.CSSProperties = { fontSize: 10, padding: "2px 8px", borderRadius: 3, background: theme.bgSurface, color: theme.textDim, border: `1px solid ${theme.border}`, cursor: "pointer" };
 
   return (
-    <div className="w-full h-full flex flex-col" style={{ background: bgDeep }}>
+    <div ref={rootRef} tabIndex={0} className="w-full h-full flex flex-col outline-none" style={{ background: bgDeep }}>
       {/* Toolbar */}
       <div className="flex items-center px-3 gap-3 shrink-0" style={{ height: 30, borderBottom: `1px solid ${theme.border}`, background: bgPanel }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: dimText, letterSpacing: "0.05em" }}>TIMELINE</span>
@@ -365,18 +395,45 @@ export function Timeline() {
         <button onClick={() => { setMarkers([]); draw(); }} style={btnStyle}>Clear Markers</button>
         {selection && <span style={{ fontSize: 9, color: theme.accent }}>Selected: {Math.abs(selection.end - selection.start).toLocaleString()} cycles</span>}
         {loading && <span style={{ fontSize: 10, color: dimText }} className="animate-pulse">Loading...</span>}
-        
+
+        {/* Round-6 T-1: cycle cursor readout + "Go to cycle N" + snap toggle */}
+        <span style={{ fontSize: 9, color: theme.textMuted, marginLeft: 10, fontFamily: "monospace" }}>
+          cyc {cursor.cycle.toLocaleString()} / {Math.max(totalCycles, cursor.totalCycles).toLocaleString()}
+        </span>
+        <label style={{ fontSize: 9, color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}
+               title="Type a cycle N and press Enter to jump the shared cursor. Ctrl+G or g also opens this prompt.">
+          go to
+          <input
+            type="number" min={0} max={Math.max(totalCycles, cursor.totalCycles)}
+            value={goTo.value}
+            placeholder={`0–${Math.max(totalCycles, cursor.totalCycles)}`}
+            onChange={e => goTo.setValue(e.target.value)}
+            onKeyDown={goTo.onKeyDown}
+            onBlur={goTo.commit}
+            style={{
+              width: 70, height: 18, fontSize: 9, padding: "0 4px",
+              background: theme.bgSurface, color: theme.text,
+              border: `1px solid ${theme.border}`, borderRadius: 2, outline: "none",
+            }}
+          />
+        </label>
+        <label style={{ fontSize: 9, color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}
+               title="Snap viewport cycles-per-pixel to an integer so a single clock never straddles two pixels.">
+          <input type="checkbox" checked={snapToCycle} onChange={e => setSnapToCycle(e.target.checked)} />
+          snap to cycle
+        </label>
+
         {/* Nsight Style Live Filter */}
         <div style={{ marginLeft: 16, display: "flex", alignItems: "center" }}>
           <span style={{ fontSize: 9, color: theme.textMuted, marginRight: 6 }}>Filter:</span>
-          <input 
-            type="text" 
-            placeholder="e.g. DMA, MAC..." 
-            style={{ 
-              width: 100, height: 18, fontSize: 9, padding: "0 6px", 
-              background: theme.bgSurface, color: theme.text, 
-              border: `1px solid ${theme.border}`, borderRadius: 2, 
-              outline: "none" 
+          <input
+            type="text"
+            placeholder="e.g. DMA, MAC..."
+            style={{
+              width: 100, height: 18, fontSize: 9, padding: "0 6px",
+              background: theme.bgSurface, color: theme.text,
+              border: `1px solid ${theme.border}`, borderRadius: 2,
+              outline: "none"
             }} 
             onChange={() => {
                // Placeholder: a real event filter would wire a setFilter here.
@@ -401,6 +458,20 @@ export function Timeline() {
           onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={() => { vp.current.dragging = false; vp.current.selStart = -1; }}
           onDoubleClick={onDblClick}>
           <canvas ref={canvasRef} className="absolute inset-0" />
+          {/* Round-6 T-1: DOM-overlaid cursor line.  Kept out of the
+              canvas draw() body (T-3 territory); this also means it
+              never coalesces with the RAF loop and is always fresh. */}
+          {(() => {
+            const c = cursor.cycle;
+            const { offset, cpp } = vp.current;
+            const pxW = containerRef.current?.clientWidth ?? 0;
+            const x   = LANE_LABEL_W + (c - offset) / Math.max(cpp, 1e-9);
+            if (x < LANE_LABEL_W || x > pxW) return null;
+            return (
+              <div aria-hidden className="absolute pointer-events-none"
+                   style={{ left: x, top: 0, bottom: 0, width: 1, background: theme.accent, boxShadow: `0 0 4px ${theme.accent}99` }} />
+            );
+          })()}
           {tooltip && (
             <div className="absolute z-50 pointer-events-none rounded px-2 py-1.5 shadow-xl" style={{
               left: tooltip.x, top: tooltip.y, fontSize: 10, whiteSpace: "pre",

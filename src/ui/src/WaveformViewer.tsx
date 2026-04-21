@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useTheme } from "./ThemeContext";
 import { useLiveWindow } from "./hooks/useLiveWindow";
+import { useCycleCursor, useGoToCycleInput } from "./hooks/useCycleCursor";
 import {
   Activity, ZoomIn, ZoomOut, Maximize2, Search, Download,
   Filter, X, Crosshair, Bookmark,
@@ -436,6 +437,12 @@ export function WaveformViewer() {
   }>(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(() => loadBookmarks());
 
+  // Round-6 T-1: shared cycle cursor.  Cursor A tracks the shared
+  // store so Arrow-key / Ctrl+G / "go to cycle" input from any panel
+  // (Timeline, FlameGraph, HardwareVisualizer, or this one) moves it.
+  const cursor = useCycleCursor();
+  const goTo   = useGoToCycleInput(cursor);
+
   // ─── Load VCD: menu event + per-instance wiring ───────────────────────────
   const loadVcdFromPath = useCallback(async (path: string) => {
     setLoadError(null);
@@ -855,7 +862,85 @@ export function WaveformViewer() {
     return () => window.removeEventListener("keydown", onKey);
   }, [jumpNextBookmark]);
 
+  // ─── Round-6 T-1: cycle-granular keyboard control ────────────────────────
+  // Pre-sorted edge (transition) index for the focused signal.  Used
+  // by `stepEdge` to snap the cursor to the next / previous posedge
+  // (Surfer 0.2.0 + GTKWave 3.3 convention).  Binary-searched at O(log N).
+  const selectedSignalForEdges = useMemo(() => {
+    if (!selectedSig) return null;
+    for (const g of groups) for (const s of g.children) if (s.id === selectedSig) return s;
+    return null;
+  }, [groups, selectedSig]);
+
+  const focusedEdges = useMemo<number[]>(() => {
+    const s = selectedSignalForEdges;
+    if (!s || s.events.length === 0) return [];
+    // Sort defensively — demo path already sorts, but a real VCD may
+    // carry out-of-order glitches that break stepEdge's binary search.
+    const ticks = s.events.map(e => e.t).slice().sort((a, b) => a - b);
+    // De-dupe so stepEdge never gets trapped on a same-cycle zero-width pulse.
+    return ticks.filter((t, i) => i === 0 || t !== ticks[i - 1]);
+  }, [selectedSignalForEdges]);
+
+  // Keep cursor A in lock-step with the shared cursor when the user
+  // moved it from another panel.  Comparing against `cursorA ?? -1`
+  // avoids the feedback loop on the first render.
+  useEffect(() => {
+    if (cursorA !== cursor.cycle) setCursorA(cursor.cycle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cursor.cycle]);
+
+  // Panel-scoped keybindings.  Focus-aware so typing "g" in an input
+  // doesn't snap the trace — useCycleCursor's helper already handles
+  // that, but we duplicate the hijack logic here so the Waveform
+  // doesn't need rootRef.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const root = containerRef.current;
+      if (!root) return;
+      const r = root.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) return;
+      const target = e.target as HTMLElement | null;
+      const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (isInput && !(e.ctrlKey || e.metaKey)) return;
+
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        if (e.shiftKey) cursor.stepBy(1);
+        else            cursor.stepEdge(1, focusedEdges);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (e.shiftKey) cursor.stepBy(-1);
+        else            cursor.stepEdge(-1, focusedEdges);
+      } else if (e.key === ".") {
+        e.preventDefault();
+        cursor.stepEdge(1, focusedEdges);
+      } else if (e.key === ",") {
+        e.preventDefault();
+        cursor.stepEdge(-1, focusedEdges);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g" && !e.shiftKey) {
+        e.preventDefault();
+        cursor.goToCyclePrompt();
+      } else if (e.key === "g" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !isInput) {
+        e.preventDefault();
+        cursor.goToCyclePrompt();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cursor, focusedEdges]);
+
+  // Publish our trace bound (derived from totalTicks further down)
+  // into the shared store. Placed near the bottom of the bookmark
+  // block so `totalTicks` is already in scope by the time it runs.
+
   const signalCount = groups.reduce((n, g) => n + g.children.length, 0);
+
+  // Publish trace bound into the shared cursor so every other panel
+  // caps its "go to cycle" input to the same upper limit.
+  useEffect(() => {
+    cursor.setTotalCycles(Math.max(1, totalTicks));
+  }, [totalTicks, cursor]);
 
   return (
     <main role="main" aria-label="Waveform viewer" className="w-full h-full flex flex-col" style={{ background: theme.bgPanel }}>
@@ -935,9 +1020,27 @@ export function WaveformViewer() {
            style={{ height: 26, borderBottom: `1px solid ${theme.border}`, background: theme.bgSurface, fontSize: 10 }}>
         <div style={{ color: theme.textMuted }}>
           <Crosshair size={10} style={{ marginRight: 4, verticalAlign: "middle" }} />
-          drag=pan · <strong>Alt</strong>-click=A · <strong>Shift</strong>-click=B · right-click=bookmark · Ctrl+B=next bookmark · Ctrl-scroll=zoom
+          drag=pan · <strong>Alt</strong>-click=A · <strong>Shift</strong>-click=B · right-click=bookmark · Ctrl+B=next bookmark · <strong>ArrowLeft/Right</strong>=prev/next edge · <strong>Shift+Arrow</strong>=±1 cyc · <strong>Ctrl+G</strong>=go to
         </div>
         <div className="flex-1" />
+        {/* Round-6 T-1: numeric "Go to tick" / "Go to cycle" input — integer snap. */}
+        <label style={{ color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}
+               title="Type a cycle N and press Enter. Ctrl+G or g opens the same prompt from inside the waveform.">
+          go to
+          <input
+            type="number" min={0} max={Math.max(totalTicks, cursor.totalCycles)}
+            placeholder={`0–${Math.max(totalTicks, cursor.totalCycles)}`}
+            value={goTo.value}
+            onChange={e => goTo.setValue(e.target.value)}
+            onKeyDown={goTo.onKeyDown}
+            onBlur={goTo.commit}
+            style={{
+              width: 74, height: 18, fontSize: 10, padding: "0 4px",
+              background: theme.bgEditor, color: theme.text,
+              border: `1px solid ${theme.border}`, borderRadius: 2, outline: "none",
+            }}
+          />
+        </label>
         <Readout tag="A" colour={theme.warning} cycle={cursorA} value={valueAt(selectedSignal, cursorA)} sig={selectedSignal} />
         <Readout tag="B" colour={theme.info}    cycle={cursorB} value={valueAt(selectedSignal, cursorB)} sig={selectedSignal} />
         {cursorA != null && cursorB != null && (
