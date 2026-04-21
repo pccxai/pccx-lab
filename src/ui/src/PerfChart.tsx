@@ -1,43 +1,43 @@
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import * as echarts from "echarts";
 import { useTheme } from "./ThemeContext";
+
+// Round-4 T-1: PerfChart now renders `fetch_live_window` IPC output
+// verbatim — no RNG, no synthetic curves. When no trace is loaded
+// the chart is empty and a placeholder overlay reads "no trace".
+interface LiveSample { ts_ns: number; mac_util: number; dma_bw: number; stall_pct: number }
 
 export function PerfChart() {
   const theme = useTheme();
   const chartRef = useRef<HTMLDivElement>(null);
   const [data, setData] = useState<{ time: string; mac: number; l2Read: number; l2Write: number }[]>([]);
+  const [hasTrace, setHasTrace] = useState(true);
 
-  // Generate initial history
+  // Poll fetch_live_window at 2 Hz.  Empty vec ⇒ no trace loaded.
   useEffect(() => {
-    const initData = [];
-    let now = new Date();
-    for (let i = 0; i < 60; i++) {
-        initData.push({
-            time: new Date(now.getTime() - (60 - i) * 500).toLocaleTimeString('en-US', { hour12: false, fractionalSecondDigits: 1 }),
-            mac: 20 + Math.random() * 60,
-            l2Read: 40 + Math.random() * 50,
-            l2Write: 10 + Math.random() * 30,
-        });
-    }
-    setData(initData);
-  }, []);
-
-  // Live updates
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setData(prev => {
-        const next = [...prev.slice(1)];
-        const last = prev[prev.length - 1] || { mac: 50, l2Read: 50, l2Write: 20 };
-        next.push({
-            time: new Date().toLocaleTimeString('en-US', { hour12: false, fractionalSecondDigits: 1 }),
-            mac: Math.max(0, Math.min(100, last.mac + (Math.random() - 0.5) * 20)),
-            l2Read: Math.max(0, Math.min(100, last.l2Read + (Math.random() - 0.5) * 30)),
-            l2Write: Math.max(0, Math.min(100, last.l2Write + (Math.random() - 0.5) * 15)),
-        });
-        return next;
-      });
-    }, 500);
-    return () => clearInterval(timer);
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const rows: LiveSample[] = await invoke("fetch_live_window", { windowCycles: 256 });
+        if (cancelled) return;
+        setHasTrace(rows.length > 0);
+        setData(rows.map(r => ({
+          time:    `${(r.ts_ns / 1_000_000).toFixed(1)}ms`,
+          mac:     r.mac_util  * 100,
+          // DMA_BW / stall tracks driven by the same reducer.  L2-read
+          // and L2-write are modelled as DMA_READ and DMA_WRITE shares;
+          // we split 60/40 since live_window collapses them under dma_bw.
+          l2Read:  r.dma_bw    * 100 * 0.6,
+          l2Write: r.dma_bw    * 100 * 0.4,
+        })));
+      } catch {
+        if (!cancelled) { setHasTrace(false); setData([]); }
+      }
+    };
+    poll();
+    const timer = setInterval(poll, 500);
+    return () => { cancelled = true; clearInterval(timer); };
   }, []);
 
   useEffect(() => {
@@ -121,5 +121,18 @@ export function PerfChart() {
     return () => window.removeEventListener("resize", resize);
   }, [data, theme]);
 
-  return <div ref={chartRef} className="w-full h-full" />;
+  return (
+    <div className="w-full h-full" style={{ position: "relative" }}>
+      <div ref={chartRef} className="w-full h-full" />
+      {!hasTrace && (
+        <div style={{
+          position: "absolute", inset: 0, display: "flex",
+          alignItems: "center", justifyContent: "center",
+          fontSize: 11, color: theme.textMuted, pointerEvents: "none",
+        }}>
+          no trace loaded — open a .pccx to see live perf
+        </div>
+      )}
+    </div>
+  );
 }

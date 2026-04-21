@@ -1,7 +1,16 @@
 import { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useTheme } from "./ThemeContext";
 import { useI18n } from "./i18n";
 import { Terminal, Activity, Info, Trash2, PanelLeftClose, PanelRightClose, PanelBottomClose, X } from "lucide-react";
+
+// Shape of `fetch_live_window` IPC result (see core/src/live_window.rs).
+interface LiveSample {
+  ts_ns:     number;
+  mac_util:  number; // 0..1
+  dma_bw:    number; // 0..1
+  stall_pct: number; // 0..1
+}
 
 export type DockPos = "left" | "right" | "bottom";
 
@@ -97,23 +106,32 @@ export function BottomPanel({ dock = "bottom", onDockChange, onClose }: BottomPa
     setConsoleLines(L => [...L, `$ ${cmd}`, ...reply]);
   };
 
-  // ── Telemetry state ───────────────────────────────────────────────────
+  // ── Telemetry state — Round-4 T-1: fed by `fetch_live_window` IPC.
+  //    No RNG fallback: if no trace is loaded the IPC returns []
+  //    and the panel renders an empty-state message (Yuan OSDI 2014
+  //    loud-fallback mirrors api_ring::list_from_trace).
   const [samples, setSamples] = useState<TelemetrySample[]>([]);
+  const [hasTrace, setHasTrace] = useState(true);
   useEffect(() => {
-    let tick = 0;
-    const id = setInterval(() => {
-      tick += 1;
-      setSamples(S => {
-        const next = [...S, {
-          t: tick,
-          mac_util: 55 + Math.sin(tick / 6) * 25 + Math.random() * 6,
-          dma_bw:   40 + Math.cos(tick / 4) * 20 + Math.random() * 5,
-          stall:    12 + Math.max(0, Math.sin(tick / 3)) * 8 + Math.random() * 4,
-        }];
-        return next.length > 120 ? next.slice(next.length - 120) : next;
-      });
-    }, 500);
-    return () => clearInterval(id);
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const rows: LiveSample[] = await invoke("fetch_live_window", { windowCycles: 256 });
+        if (cancelled) return;
+        setHasTrace(rows.length > 0);
+        setSamples(rows.map((r, i) => ({
+          t:        i,
+          mac_util: r.mac_util  * 100,
+          dma_bw:   r.dma_bw    * 100,
+          stall:    r.stall_pct * 100,
+        })));
+      } catch {
+        if (!cancelled) { setHasTrace(false); setSamples([]); }
+      }
+    };
+    poll();
+    const id = setInterval(poll, 500);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
   // ── Render helpers ────────────────────────────────────────────────────
@@ -276,7 +294,16 @@ export function BottomPanel({ dock = "bottom", onDockChange, onClose }: BottomPa
               <div className="flex-1" />
               <span>{samples.length} samples</span>
             </div>
-            <canvas ref={canvasRef} style={{ flex: 1, display: "block" }} />
+            {hasTrace ? (
+              <canvas ref={canvasRef} style={{ flex: 1, display: "block" }} />
+            ) : (
+              <div style={{
+                flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 11, color: theme.textMuted,
+              }}>
+                no trace loaded — open a .pccx to see live telemetry
+              </div>
+            )}
           </div>
         )}
       </div>

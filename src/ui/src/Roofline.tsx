@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, useMemo } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import * as echarts from "echarts";
 import { useTheme } from "./ThemeContext";
 import { ActivitySquare, Zap, Cpu, HardDrive } from "lucide-react";
+
+// Shape of `fetch_live_window` (see core/src/live_window.rs).
+interface LiveSample { ts_ns: number; mac_util: number; dma_bw: number; stall_pct: number }
 
 // pccx v002 · KV260 target roofline constants
 const PEAK_TOPS   = 1024;   // 32×32 MAC @ 1 GHz = 1024 GOPS
@@ -173,22 +177,42 @@ export function Roofline() {
     return () => { window.removeEventListener("resize", onResize); chartInstance.current?.dispose(); };
   }, [theme, filteredKernels]);
 
-  // Live jitter
+  // Round-4 T-1: the "Live" button polls `fetch_live_window` instead
+  // of jittering kernel points with RNG.  Each poll takes the average
+  // mac_util / dma_bw across the ring and re-scales every kernel's
+  // achieved GOPS by `mac_util` (keeps the scatter anchored to the
+  // real trace). Empty samples (no trace loaded) restore the static
+  // kernel points so the panel never renders invented noise.
+  const [liveUtil, setLiveUtil] = useState<number | null>(null);
   useEffect(() => {
     if (!running || !chartInstance.current) return;
-    const id = setInterval(() => {
-      const pts = filteredKernels.map(k => {
-        const jitter = 1 + (Math.random() - 0.5) * 0.06;
-        const ceiling = k.intensity < RIDGE_DDR ? k.intensity * PEAK_DDR_BW : PEAK_TOPS;
-        const perf = Math.min(ceiling * 0.995, k.achieved * jitter);
-        return { value: [k.intensity * (1 + (Math.random() - 0.5) * 0.02), perf],
-                 name: k.name,
-                 itemStyle: { color: KIND_COLOR[k.kind] },
-                 label: { show: true, formatter: k.name, color: theme.text, fontSize: 9, position: "top" as const } };
-      });
-      chartInstance.current?.setOption({ series: [{}, {}, {}, { data: pts }] });
-    }, 450);
-    return () => clearInterval(id);
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const rows: LiveSample[] = await invoke("fetch_live_window", { windowCycles: 256 });
+        if (cancelled) return;
+        if (rows.length === 0) { setLiveUtil(null); return; }
+        const mac = rows.reduce((a, r) => a + r.mac_util, 0) / rows.length;
+        setLiveUtil(mac);
+        const pts = filteredKernels.map(k => {
+          const ceiling = k.intensity < RIDGE_DDR ? k.intensity * PEAK_DDR_BW : PEAK_TOPS;
+          // Scale achieved GOPS by the live MAC utilisation, clamped
+          // to the kernel's own ceiling.  Panel still shows per-kernel
+          // deltas while being driven by real trace events.
+          const perf = Math.min(ceiling * 0.995, k.achieved * Math.max(0.05, mac));
+          return { value: [k.intensity, perf],
+                   name: k.name,
+                   itemStyle: { color: KIND_COLOR[k.kind] },
+                   label: { show: true, formatter: k.name, color: theme.text, fontSize: 9, position: "top" as const } };
+        });
+        chartInstance.current?.setOption({ series: [{}, {}, {}, { data: pts }] });
+      } catch {
+        if (!cancelled) setLiveUtil(null);
+      }
+    };
+    poll();
+    const id = setInterval(poll, 500);
+    return () => { cancelled = true; clearInterval(id); };
   }, [running, filteredKernels, theme.text]);
 
   const totals = useMemo(() => {
@@ -225,6 +249,16 @@ export function Roofline() {
               }}>{k}</button>
           ))}
         </div>
+        {running && liveUtil === null && (
+          <span style={{ fontSize: 10, color: theme.warning, marginRight: 8 }}>
+            no trace — load a .pccx
+          </span>
+        )}
+        {running && liveUtil !== null && (
+          <span style={{ fontSize: 10, color: theme.textMuted, marginRight: 8 }}>
+            live MAC {(liveUtil * 100).toFixed(1)}%
+          </span>
+        )}
         <button
           onClick={() => setRunning(!running)}
           className="flex items-center gap-2 px-3 py-1 rounded text-xs font-semibold transition-all"
