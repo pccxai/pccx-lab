@@ -24,6 +24,7 @@ pub mod api_ring;
 pub mod live_window;
 pub mod vivado_timing;
 pub mod step_snapshot;
+pub mod speculative;
 
 // ─── Convenience re-exports (public API surface) ──────────────────────────────
 pub use pccx_format::{PccxFile, PccxHeader, PccxError, ArchConfig, TraceConfig, PayloadConfig, fnv1a_64};
@@ -45,4 +46,8 @@ pub use step_snapshot::{step_to_cycle, CoreState, RegisterSnapshot};
 pub use vivado_timing::{
     parse_timing_report, parse_worst_endpoint,
     TimingReport, ClockDomain, FailingPath, ParseError as TimingParseError,
+};
+pub use speculative::{
+    AcceptStep, AcceptRate,
+    longest_matching_prefix,
 };
