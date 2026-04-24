@@ -25,7 +25,7 @@
 
 use pccx_core::pccx_format::PccxFile;
 use pccx_core::trace::NpuTrace;
-use pccx_core::golden_diff;
+use pccx_verification::golden_diff;
 
 use std::fs::File;
 use std::io::Read;

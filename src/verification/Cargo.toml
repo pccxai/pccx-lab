@@ -1,0 +1,16 @@
+[package]
+name = "pccx-verification"
+version = "0.1.0"
+edition = "2021"
+
+# Verification gate — golden-model diff + robust TOML/JSON reader.  Driven
+# by the NVIDIA consultation report §6.2 (end-to-end correctness) and §4
+# (toolchain maturity / tolerant config reads).
+
+[dependencies]
+pccx-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+toml = "1.1.2"
+thiserror.workspace = true
+anyhow.workspace = true

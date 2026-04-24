@@ -26,8 +26,6 @@ pub mod step_snapshot;
 pub mod speculative;
 pub mod isa_spec;
 pub mod api_spec;
-pub mod golden_diff;
-pub mod robust_reader;
 
 // ─── Convenience re-exports (public API surface) ──────────────────────────────
 pub use pccx_format::{PccxFile, PccxHeader, PccxError, ArchConfig, TraceConfig, PayloadConfig, fnv1a_64};

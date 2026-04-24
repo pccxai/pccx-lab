@@ -15,7 +15,7 @@
 // across machines.  Tolerances live on the reference row so the
 // PyTorch side controls how strict the gate is.
 
-use crate::trace::NpuTrace;
+use pccx_core::trace::NpuTrace;
 
 use serde::{Deserialize, Serialize};
 
@@ -177,7 +177,7 @@ impl TraceStep {
         self.mac == 0 && self.dma_read == 0 && self.dma_write == 0 &&
         self.barrier == 0 && self.stall == 0 && self.api_name.is_none()
     }
-    fn accumulate(&mut self, ev: &crate::trace::NpuEvent) {
+    fn accumulate(&mut self, ev: &pccx_core::trace::NpuEvent) {
         let end = ev.start_cycle + ev.duration;
         // "Never accumulated anything" if no counter is set AND the
         // caller hasn't pre-seeded the span on an API_CALL boundary.
@@ -313,7 +313,7 @@ pub fn profile_to_jsonl(rows: &[RefProfileRow]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trace::{NpuEvent, NpuTrace};
+    use pccx_core::trace::{NpuEvent, NpuTrace};
 
     fn mk_trace() -> NpuTrace {
         let mut events = Vec::new();
