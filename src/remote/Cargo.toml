@@ -1,0 +1,22 @@
+[package]
+name = "pccx-remote"
+version = "0.1.0"
+edition = "2021"
+
+# Secure remote backend daemon — Phase 3 scaffold.
+#
+# Target feature set (roadmap §Phase 3):
+#   * WireGuard or mTLS-over-QUIC tunnel with hardware-bound device keys.
+#   * OIDC SSO + hardware 2FA, per-user RBAC, per-project scopes.
+#   * Zero-trust audit log (append-only store).
+#   * Per-session overlayfs sandbox, kill-switch API.
+#   * Optional web client (WASM) parity with the native Tauri IDE.
+#
+# Currently empty scaffold — lands as a workspace member now so the
+# dependency graph + CI surface are stable while auth / tunnel /
+# session machinery lands incrementally.
+
+[dependencies]
+pccx-core = { path = "../core" }
+pccx-reports = { path = "../reports" }
+pccx-verification = { path = "../verification" }

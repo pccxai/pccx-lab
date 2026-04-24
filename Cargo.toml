@@ -5,6 +5,7 @@ members = [
     "src/verification",
     "src/authoring",
     "src/evolve",
+    "src/remote",
     "src/uvm_bridge",
     "src/ai_copilot",
     "src/ui/src-tauri"
