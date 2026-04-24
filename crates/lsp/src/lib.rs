@@ -10,12 +10,16 @@
 //   C-slice fragment — `AsyncLspMultiplexer`.
 //   C-slice proper — JSON-RPC wire framing (`encode_frame` /
 //     `decode_frame` over `Content-Length: N\r\n\r\n<body>`) with
-//     a `FrameError` taxonomy.  Pure byte layer; the typed
-//     `lsp-types` message envelope + the pump that connects the
-//     codec to `LspSubprocess` stdio land in the next slice.
+//     a `FrameError` taxonomy.  Pure byte layer.
+//   D-slice — async framed IO (`write_frame` / `read_frame`) over
+//     any `tokio::io::AsyncWrite` / `AsyncRead`.  This is the seam
+//     that connects the codec to `LspSubprocess` stdio (or to an
+//     in-memory `tokio::io::duplex` pair for tests).  The typed
+//     `lsp-types` envelope + request/response correlation land in
+//     the next slice.
 // What remains for Phase 2 proper: typed `lsp-types` envelope +
-// JSON-RPC pump, a concrete verible backend, and the tower-lsp
-// adapter that serves the stack to Monaco.
+// request/response correlation, a concrete verible backend, and the
+// tower-lsp adapter that serves the stack to Monaco.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -23,6 +27,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::{Child, Command};
 
 pub const LSP_FAÇADE_API_VERSION: u32 = 1;
@@ -747,6 +752,84 @@ pub fn decode_frame(buf: &[u8]) -> Result<Option<(Vec<u8>, usize)>, FrameError> 
     Ok(Some((buf[body_start..body_end].to_vec(), body_end)))
 }
 
+// ─── Async framed IO (Phase 2 M2.1, D-slice) ─────────────────────────
+//
+// Thin wrappers that run `encode_frame` / `decode_frame` over any
+// `tokio::io::AsyncWrite` / `AsyncRead`.  Generic over the IO type
+// so they attach equally well to `LspSubprocess`'s child stdio
+// (production) or to `tokio::io::duplex` pairs (tests without
+// spawning processes).
+//
+// Error taxonomy: IO failures surface as `std::io::Error`; malformed
+// frames are converted to `io::Error` with a distinct `InvalidData`
+// kind carrying the underlying `FrameError` via the `io::Error`
+// source chain.  Callers who need to discriminate can downcast via
+// `.get_ref().and_then(|e| e.downcast_ref::<FrameError>())`.
+
+fn frame_io_error(err: FrameError) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, err)
+}
+
+/// Writes a complete framed message to the transport and flushes it.
+/// Calls `encode_frame` internally so callers only think about the
+/// body.
+pub async fn write_frame<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    body: &[u8],
+) -> std::io::Result<()> {
+    let framed = encode_frame(body);
+    w.write_all(&framed).await?;
+    w.flush().await
+}
+
+/// Reads exactly one complete framed message from the transport.
+///
+/// Returns:
+/// - `Ok(Some(body))` — one complete frame decoded.
+/// - `Ok(None)` — the transport returned EOF before any byte of a
+///   frame could be read (clean close; session over).
+/// - `Err(io::Error)` — IO failure OR framing error (kind
+///   `InvalidData`, with a `FrameError` in the source chain).
+///
+/// `buf` is the caller-owned read buffer; it is extended in place as
+/// bytes arrive and is left with whatever bytes remain *after* the
+/// decoded frame (i.e., if the stream sent two frames back-to-back,
+/// the second one is preserved for the next `read_frame` call).
+pub async fn read_frame<R: AsyncRead + Unpin>(
+    r: &mut R,
+    buf: &mut Vec<u8>,
+) -> std::io::Result<Option<Vec<u8>>> {
+    loop {
+        // Try decoding whatever we already have.
+        match decode_frame(buf) {
+            Ok(Some((body, consumed))) => {
+                buf.drain(..consumed);
+                return Ok(Some(body));
+            }
+            Ok(None) => { /* need more bytes */ }
+            Err(err) => return Err(frame_io_error(err)),
+        }
+
+        // Read more bytes.  One syscall at a time is fine — real
+        // LSP traffic is tiny, and tokio batches the kernel reads.
+        let mut tmp = [0u8; 4096];
+        let n = r.read(&mut tmp).await?;
+        if n == 0 {
+            // Clean EOF.  If `buf` is non-empty we hit EOF mid-frame
+            // — that's an unexpected close by the peer.
+            return if buf.is_empty() {
+                Ok(None)
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "transport closed mid-frame",
+                ))
+            };
+        }
+        buf.extend_from_slice(&tmp[..n]);
+    }
+}
+
 // ─── Async multiplexer (Phase 2 M2.1, C-slice fragment) ──────────────
 //
 // Async counterpart to `LspMultiplexer`.  Holds one triple of async
@@ -1354,5 +1437,78 @@ mod tests {
         let header = format!("Content-Length: {claim}\r\n\r\n");
         let err = decode_frame(header.as_bytes()).unwrap_err();
         assert!(matches!(err, FrameError::ContentLengthTooLarge { claimed } if claimed == claim));
+    }
+
+    // ─── Async framed IO (D-slice) ───
+
+    #[tokio::test]
+    async fn write_frame_then_read_frame_roundtrips_body() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#.to_vec();
+
+        write_frame(&mut client, &body).await.expect("write");
+        drop(client); // signal EOF so the reader's next call sees a clean close.
+
+        let mut buf = Vec::new();
+        let got = read_frame(&mut server, &mut buf)
+            .await
+            .expect("read")
+            .expect("one frame");
+        assert_eq!(got, body);
+        assert!(buf.is_empty(), "buffer fully drained");
+    }
+
+    #[tokio::test]
+    async fn read_frame_returns_none_on_clean_eof() {
+        let (client, mut server) = tokio::io::duplex(64);
+        drop(client); // immediate EOF, nothing written.
+
+        let mut buf = Vec::new();
+        let got = read_frame(&mut server, &mut buf).await.expect("read ok");
+        assert!(got.is_none(), "clean EOF maps to None");
+    }
+
+    #[tokio::test]
+    async fn read_frame_errors_unexpected_eof_mid_frame() {
+        let (mut client, mut server) = tokio::io::duplex(64);
+        // Write a half-frame header, then close.
+        client.write_all(b"Content-Length: 42\r\n").await.unwrap();
+        drop(client);
+
+        let mut buf = Vec::new();
+        let err = read_frame(&mut server, &mut buf).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[tokio::test]
+    async fn read_frame_maps_malformed_header_to_invalid_data() {
+        let (mut client, mut server) = tokio::io::duplex(64);
+        client
+            .write_all(b"Content-Length: bogus\r\n\r\n{}")
+            .await
+            .unwrap();
+        drop(client);
+
+        let mut buf = Vec::new();
+        let err = read_frame(&mut server, &mut buf).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn read_frame_back_to_back_preserves_second_frame_in_buf() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let b1 = br#"{"id":1}"#.to_vec();
+        let b2 = br#"{"id":2}"#.to_vec();
+        write_frame(&mut client, &b1).await.unwrap();
+        write_frame(&mut client, &b2).await.unwrap();
+        drop(client);
+
+        let mut buf = Vec::new();
+        let got1 = read_frame(&mut server, &mut buf).await.unwrap().unwrap();
+        assert_eq!(got1, b1);
+        let got2 = read_frame(&mut server, &mut buf).await.unwrap().unwrap();
+        assert_eq!(got2, b2);
+        let got_eof = read_frame(&mut server, &mut buf).await.unwrap();
+        assert!(got_eof.is_none());
     }
 }

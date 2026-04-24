@@ -91,13 +91,32 @@ may carry breaking public-API changes.
   four query kinds, and register-replaces-existing via a tagged
   local `AsyncCompletionProvider` impl.
 
+### Added (D-slice — async framed IO)
+
+- `write_frame(w, body)` — generic over `tokio::io::AsyncWrite +
+  Unpin`.  Encodes the frame and flushes.
+- `read_frame(r, buf)` — generic over `tokio::io::AsyncRead + Unpin`.
+  Reads one complete frame, returning `Ok(None)` on clean EOF and
+  `io::Error(UnexpectedEof)` on EOF mid-frame.  The caller-owned
+  read buffer is drained incrementally so two back-to-back frames
+  coming in one kernel read are decoded correctly across successive
+  calls.
+- Malformed-frame errors (`FrameError::*`) surface as `io::Error`
+  with `ErrorKind::InvalidData` and the original `FrameError` in the
+  source chain, matching idiomatic tokio patterns.
+- Five new tokio tests covering `write_frame` + `read_frame`
+  round-trip over `tokio::io::duplex`, clean-EOF -> `None`,
+  mid-frame EOF -> `UnexpectedEof`, malformed-header ->
+  `InvalidData`, and back-to-back frames preserved across reads.
+
 ### Deferred (to next slice)
 
 - Typed `lsp-types` envelope over the framing layer (typed
-  `Request<Params>` / `Response<R>` / `Notification<N>`).
-- JSON-RPC pump that attaches the framing codec to `LspSubprocess`
-  stdio (`AsyncRead` / `AsyncWrite` drivers + request/response
-  correlation).
+  `Request<Params>` / `Response<R>` / `Notification<N>` +
+  request/response correlation keyed by message id).
+- An `LspChannel` that takes ownership of `LspSubprocess` stdio and
+  drives a pump task (read loop + write channel) on top of
+  `read_frame` / `write_frame`.
 - Concrete verible backend and the M2.1 smoke test ("type `GEMM_` in
   a .sv file, receive verible completions").
 - `tower-lsp` adapter for serving the stack to Monaco.
