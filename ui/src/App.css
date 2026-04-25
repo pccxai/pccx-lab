@@ -6,13 +6,13 @@
   --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", "Cascadia Code", monospace;
   --ease-apple: cubic-bezier(0.25, 0.1, 0.25, 1);
 
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
 
   color-scheme: light dark;
   color: #d4d4d4;
-  background-color: #1a1a1a;
+  background-color: #1c1c1e;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -26,12 +26,13 @@ body {
   place-items: center;
   min-width: 320px;
   min-height: 100vh;
-  background-color: #1a1a1a;
+  background-color: #1c1c1e;
   overflow: hidden;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  letter-spacing: -0.01em;
 }
 
 code, pre, .mono {
@@ -41,14 +42,36 @@ code, pre, .mono {
 #root {
   width: 100vw;
   height: 100vh;
-  background-color: #1a1a1a;
+  background-color: #1c1c1e;
 }
 
-/* Scrollbar styling (Nsight-like) */
-::-webkit-scrollbar { width: 8px; height: 8px; }
+/* Scrollbar — ultra-thin, Apple-style overlay */
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #424242; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #555; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.18);
+}
+/* Hide scrollbar in tab bars and toolbars */
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { scrollbar-width: none; }
+
+/* Global transitions */
+button { transition: all 0.15s var(--ease-apple); }
+input, textarea, select { transition: border-color 0.15s var(--ease-apple), box-shadow 0.15s var(--ease-apple); }
+input:focus, textarea:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 152, 255, 0.2);
+}
 
 /* animate-spin for loading states */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -56,7 +79,7 @@ code, pre, .mono {
 .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
 
-/* Skeleton shimmer for loading placeholders */
+/* Skeleton shimmer */
 @keyframes shimmer {
   0% { background-position: -400px 0; }
   100% { background-position: 400px 0; }

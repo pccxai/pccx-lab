@@ -573,45 +573,50 @@ function AppInner() {
               <Group orientation="vertical">
                 <Panel defaultSize={hasBottomStack ? "68%" : "100%"} minSize="20%">
                   <div className="w-full h-full flex flex-col min-w-0 min-h-0" style={{ background: bg }}>
-                    <div className="flex items-center shrink-0 overflow-x-auto gap-0.5 px-2" style={{
-                      height: 34,
+                    <div className="flex items-center shrink-0 px-1.5" style={{
+                      height: 36,
                       borderBottom: `0.5px solid ${isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.08)"}`,
                       background: panelBg,
+                      overflow: "hidden",
                     }}>
-                      <div className="flex items-center gap-0.5 py-1 px-0.5 rounded-lg" style={{
-                        background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.02)",
+                      <div className="flex items-center gap-px py-1 px-1" style={{
+                        background: isDark ? "rgba(255,255,255,0.025)" : "rgba(0,0,0,0.018)",
+                        borderRadius: 9,
+                        border: `0.5px solid ${isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)"}`,
                       }}>
                         {TABS.map(t => {
                           const isActive = activeTab === t.id;
                           return (
                             <button key={t.id} onClick={() => setActiveTab(t.id)}
-                              className="flex items-center gap-1 shrink-0"
+                              title={t.label}
+                              className="flex items-center gap-1.5 shrink-0"
                               style={{
                                 fontSize: 11, fontWeight: isActive ? 600 : 400,
-                                color: isActive ? theme.text : theme.textMuted,
-                                padding: "4px 10px",
-                                borderRadius: 7,
+                                color: isActive ? theme.text : theme.textFaint,
+                                padding: isActive ? "5px 12px" : "5px 8px",
+                                borderRadius: 8,
                                 background: isActive
-                                  ? (isDark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.9)")
+                                  ? (isDark ? "rgba(255,255,255,0.1)" : "#ffffff")
                                   : "transparent",
                                 boxShadow: isActive
-                                  ? (isDark ? "0 1px 3px rgba(0,0,0,0.3)" : "0 1px 3px rgba(0,0,0,0.1)")
+                                  ? (isDark ? "0 1px 4px rgba(0,0,0,0.25), 0 0.5px 1px rgba(0,0,0,0.15)" : "0 1px 4px rgba(0,0,0,0.08), 0 0.5px 1px rgba(0,0,0,0.04)")
                                   : "none",
                                 transition: "all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1)",
                                 cursor: "pointer",
                                 border: "none",
+                                letterSpacing: -0.2,
                               }}>
                               {t.icon}
-                              <span className="hidden xl:inline">{t.label}</span>
+                              {isActive && <span>{t.label}</span>}
                             </button>
                           );
                         })}
                       </div>
                       <div className="flex-1" />
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 pr-1">
                         {traceLoaded
-                          ? <span style={{ fontSize: 10, color: theme.success, padding: "2px 8px", borderRadius: 10, background: isDark ? "rgba(78,200,107,0.1)" : "rgba(56,138,52,0.06)" }}>loaded</span>
-                          : <span style={{ fontSize: 10, color: theme.textFaint, padding: "2px 8px", borderRadius: 10, background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.03)" }}>no trace</span>}
+                          ? <span style={{ fontSize: 9, color: theme.success, padding: "2px 7px", borderRadius: 10, background: isDark ? "rgba(78,200,107,0.08)" : "rgba(56,138,52,0.05)", fontWeight: 500 }}>loaded</span>
+                          : <span style={{ fontSize: 9, color: theme.textFaint, padding: "2px 7px", borderRadius: 10, background: isDark ? "rgba(255,255,255,0.025)" : "rgba(0,0,0,0.02)", fontWeight: 500 }}>no trace</span>}
                       </div>
                     </div>
                     <div className="flex-1 overflow-hidden relative">
