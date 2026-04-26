@@ -24,6 +24,9 @@ cmake-build-*/
 qt6/
 aqtinstall.log
 
+# ─── ts-rs generated TypeScript bindings ───────────────────────────
+bindings/
+
 # ─── Generated trace files ─────────────────────────────────────────
 *.pccx
 output.pdf
@@ -40,12 +43,37 @@ imgui.ini
 .claude/
 .claudesignore
 .gemini/
-pccx-lab-bootstrap-task.md
+.grok/
+.cursor/
+.cursorrules
+.cursorignore
+.codex/
+.devin/
+.jules/
+.continue/
 CLAUDE.md
 AGENTS.md
 GEMINI.md
-CLAUDE_TASKS_lab.md
+CLAUDE_TASKS*.md
+*_Tasks_for_Claude*.md
+*-bootstrap-task.md
 knowledge/
+
+# ─── Task / TODO / schedule / prompt (never publish) ─────────────
+TODO.md
+TODO_*.md
+*_TODO.md
+*todo*.md
+TASKS.md
+TASKS_*.md
+*_TASKS.md
+*schedule*.md
+*prompt*.md
+PROJECT_STATUS.md
+
+# ─── External consultation / architecture review docs (never publish) ──
+*_architecture_v*.md
+*_final_architecture_*.md
 
 # ─── Local reference material (external project mirrors, PDFs, etc.) ───
 reference_to_cheet/

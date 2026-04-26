@@ -78,7 +78,7 @@ export function VerificationRunner({ repoPath }: Props) {
   return (
     <div
       className="flex flex-col gap-3 p-4 rounded-md"
-      style={{ background: theme.bgSurface, border: `1px solid ${theme.border}`, minWidth: 320 }}
+      style={{ background: theme.bgSurface, border: `0.5px solid ${theme.borderSubtle}`, minWidth: 320 }}
     >
       <div className="flex items-center gap-2">
         <PlayCircle size={16} style={{ color: theme.accent }} />
@@ -113,7 +113,7 @@ export function VerificationRunner({ repoPath }: Props) {
           className="px-3 py-2 rounded"
           style={{
             background: "rgba(241,76,76,0.12)",
-            border: `1px solid ${theme.error}`,
+            border: `0.5px solid ${theme.error}`,
             color: theme.text,
             fontSize: 12,
           }}
@@ -130,7 +130,7 @@ export function VerificationRunner({ repoPath }: Props) {
               background: allPassed
                 ? "rgba(78,200,107,0.10)"
                 : "rgba(241,76,76,0.12)",
-              border: `1px solid ${allPassed ? theme.success : theme.error}`,
+              border: `0.5px solid ${allPassed ? theme.success : theme.error}`,
             }}
           >
             {allPassed
@@ -152,7 +152,7 @@ export function VerificationRunner({ repoPath }: Props) {
             <thead>
               <tr style={{
                 color: theme.textMuted,
-                borderBottom: `1px solid ${theme.border}`,
+                borderBottom: `0.5px solid ${theme.borderSubtle}`,
               }}>
                 <th className="p-1 text-left">Testbench</th>
                 <th className="p-1 text-right">Cycles</th>
@@ -162,7 +162,7 @@ export function VerificationRunner({ repoPath }: Props) {
             </thead>
             <tbody>
               {state.summary.testbenches.map((tb) => (
-                <tr key={tb.name} style={{ borderBottom: `1px solid ${theme.borderDim}` }}>
+                <tr key={tb.name} style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
                   <td className="p-1 font-mono" style={{ color: theme.text }}>{tb.name}</td>
                   <td className="p-1 text-right">{tb.cycles.toLocaleString()}</td>
                   <td className="p-1 text-center">
@@ -170,7 +170,7 @@ export function VerificationRunner({ repoPath }: Props) {
                       className="px-2 py-0.5 rounded text-[10px] font-bold"
                       style={{
                         color: tb.verdict === "PASS" ? theme.success : theme.error,
-                        border: `1px solid ${tb.verdict === "PASS" ? theme.success : theme.error}`,
+                        border: `0.5px solid ${tb.verdict === "PASS" ? theme.success : theme.error}`,
                       }}
                     >
                       {tb.verdict}
@@ -183,7 +183,7 @@ export function VerificationRunner({ repoPath }: Props) {
                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
                         style={{
                           color: lastOpened === tb.pccx_path ? theme.success : theme.accent,
-                          border: `1px solid ${lastOpened === tb.pccx_path ? theme.success : theme.accent}`,
+                          border: `0.5px solid ${lastOpened === tb.pccx_path ? theme.success : theme.accent}`,
                           background: "transparent",
                           cursor: "pointer",
                         }}
