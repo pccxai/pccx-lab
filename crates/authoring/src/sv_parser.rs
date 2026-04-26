@@ -7,6 +7,10 @@
 // a full grammar (tree-sitter-verilog is not reliably available on
 // crates.io). Good enough for the pccx RTL codebase where modules
 // follow the `npu_interfaces.svh` port-prefix conventions.
+//
+// Phase 6 M6.3 adds FSM extraction: walks always_ff @(posedge ...)
+// bodies looking for case(state_var) patterns to extract states and
+// next-state assignments.  No full grammar — line-level walking only.
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SvModule {
@@ -39,15 +43,50 @@ pub struct SvParam {
     pub doc: Option<String>,
 }
 
+/// A single FSM state.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FsmState {
+    pub name: String,
+    /// True when this is the state assigned during synchronous reset.
+    /// Falls back to the first case label if no reset arm is found.
+    pub is_initial: bool,
+    /// True when the state appears as a case label but has no outgoing
+    /// next-state assignment inside its case arm.
+    pub is_dead: bool,
+}
+
+/// A state transition edge extracted from a next_state assignment.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FsmTransition {
+    pub from: String,
+    pub to: String,
+    /// The most recent enclosing `if (...)` condition in the case arm,
+    /// if any.  None when the assignment is unconditional.
+    pub condition: Option<String>,
+}
+
+/// One extracted FSM found in an always_ff block.
+/// `name` is the case-variable identifier (e.g. "state" from
+/// `case (state)`).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SvFsm {
+    pub name: String,
+    pub states: Vec<FsmState>,
+    pub transitions: Vec<FsmTransition>,
+    /// States that appear as case labels but have no outgoing transitions.
+    pub dead_states: Vec<String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SvParseResult {
     pub modules: Vec<SvModule>,
+    pub fsms: Vec<SvFsm>,
     pub file_path: String,
     pub total_lines: usize,
 }
 
 /// Parse a SystemVerilog source file and extract module declarations,
-/// ports, parameters, and doc comments.
+/// ports, parameters, doc comments, and FSM state machines.
 pub fn parse_sv(source: &str, file_path: &str) -> SvParseResult {
     let mut modules = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
@@ -69,8 +108,11 @@ pub fn parse_sv(source: &str, file_path: &str) -> SvParseResult {
         i += 1;
     }
 
+    let fsms = extract_fsms(&lines);
+
     SvParseResult {
         modules,
+        fsms,
         file_path: file_path.to_string(),
         total_lines,
     }
@@ -257,6 +299,383 @@ fn extract_parameters(header: &str) -> Vec<SvParam> {
 
     params
 }
+
+// ─── FSM extraction (Phase 6 M6.3) ──────────────────────────────────────
+
+/// Walk all lines, find every `always_ff @(posedge ...)` block, and
+/// extract FSMs from `case (var)` patterns inside them.
+fn extract_fsms(lines: &[&str]) -> Vec<SvFsm> {
+    let mut fsms = Vec::new();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+
+        if is_always_ff_line(trimmed) {
+            // The always_ff header line itself may end with 'begin'.
+            // Collect all lines up to and including the matching end.
+            let body_end = find_begin_end_close(lines, i);
+            // Body is the lines between the always_ff header and its end.
+            let body: &[&str] = if i + 1 < body_end {
+                &lines[i + 1..body_end]
+            } else {
+                &[]
+            };
+
+            let reset_state = find_reset_state(body);
+
+            let mut j = 0;
+            while j < body.len() {
+                let bline = body[j].trim();
+                if let Some(var) = extract_case_var(bline) {
+                    // Find the endcase for this case block
+                    let case_end = find_endcase(body, j + 1);
+                    let case_body: &[&str] = if j + 1 < case_end {
+                        &body[j + 1..case_end]
+                    } else {
+                        &[]
+                    };
+                    if let Some(fsm) = parse_case_block(var, case_body, reset_state.as_deref()) {
+                        fsms.push(fsm);
+                    }
+                    j = case_end + 1;
+                } else {
+                    j += 1;
+                }
+            }
+
+            i = body_end + 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    fsms
+}
+
+fn is_always_ff_line(line: &str) -> bool {
+    line.contains("always_ff") && line.contains("posedge")
+}
+
+/// Return the identifier inside `case (...)` or `case(...)`, or None.
+fn extract_case_var(line: &str) -> Option<String> {
+    let stripped = line.trim();
+    // Match "case (var)" or "case(var)".
+    if !stripped.starts_with("case") {
+        return None;
+    }
+    let rest = stripped[4..].trim_start();
+    if !rest.starts_with('(') {
+        return None;
+    }
+    let inner = rest[1..].trim_start();
+    let end = inner.find(')')?;
+    let var = inner[..end].trim();
+    if var.is_empty() {
+        None
+    } else {
+        Some(var.to_string())
+    }
+}
+
+/// Count `begin`/`end` tokens to find the line index of the `end` that
+/// closes the outermost `begin` started at or after `start`.
+///
+/// The line at `start` is expected to contain a `begin` (e.g. the
+/// `always_ff ... begin` header).  Returns the index of the matching
+/// `end` line, or `lines.len()` if not found.
+fn find_begin_end_close(lines: &[&str], start: usize) -> usize {
+    let mut depth: i32 = 0;
+    for (offset, line) in lines[start..].iter().enumerate() {
+        let t = line.trim();
+        for word in t.split_whitespace() {
+            // Strip trailing punctuation so "begin;" -> "begin"
+            let w = word.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
+            match w {
+                "begin" => { depth += 1; }
+                "end" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return start + offset;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if t.starts_with("endmodule") {
+            return start + offset;
+        }
+    }
+    lines.len()
+}
+
+/// Find the index of the `endcase` line that closes the `case` block
+/// starting at `start` (exclusive — search from `start` onwards).
+///
+/// Tracks nested `begin`/`end` to skip over arms that contain their
+/// own `begin...end` blocks.  Returns `lines.len()` if not found.
+fn find_endcase(lines: &[&str], start: usize) -> usize {
+    let mut depth: i32 = 0;
+    for (offset, line) in lines[start..].iter().enumerate() {
+        let t = line.trim();
+        if t == "endcase" && depth == 0 {
+            return start + offset;
+        }
+        for word in t.split_whitespace() {
+            let w = word.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
+            match w {
+                "begin" => { depth += 1; }
+                "end" => { depth -= 1; }
+                _ => {}
+            }
+        }
+        if t.starts_with("endmodule") {
+            return start + offset;
+        }
+    }
+    lines.len()
+}
+
+/// Scan always_ff block body for a reset arm: `if (!rst_n) state <= IDLE;`
+/// or `if (i_rst_n == 0)` patterns.  Returns the RHS state name.
+fn find_reset_state(body: &[&str]) -> Option<String> {
+    let mut in_reset_arm = false;
+    for line in body {
+        let t = line.trim();
+        // Heuristic: an if-condition containing rst_n negated
+        if t.starts_with("if") && t.contains('(') {
+            let cond = extract_paren_content(t);
+            if looks_like_reset(&cond) {
+                in_reset_arm = true;
+                continue;
+            } else {
+                in_reset_arm = false;
+            }
+        }
+        if t.starts_with("end") || t.starts_with("else") {
+            in_reset_arm = false;
+        }
+        if in_reset_arm {
+            if let Some(rhs) = extract_nba_rhs(t) {
+                return Some(rhs);
+            }
+        }
+    }
+    None
+}
+
+fn looks_like_reset(cond: &str) -> bool {
+    // Covers: !rst_n, ~rst_n, !i_rst_n, rst_n == 1'b0, srst etc.
+    let c = cond.trim();
+    c.contains("!rst") || c.contains("~rst") || c.contains("!i_rst") || c.contains("~i_rst")
+        || c.contains("srst") || c.contains("== 1'b0") || c.contains("==1'b0")
+}
+
+/// Extract content inside the first pair of parentheses.
+fn extract_paren_content(s: &str) -> String {
+    if let Some(start) = s.find('(') {
+        if let Some(end) = s[start + 1..].find(')') {
+            return s[start + 1..start + 1 + end].to_string();
+        }
+    }
+    String::new()
+}
+
+/// Parse the case body to build an SvFsm.
+///
+/// Strategy:
+///   - Case labels end with `:` and are not `default:`
+///   - Inside each arm, collect next-state assignments (`next_state <= X`
+///     or `state <= X`, where the LHS matches the case variable)
+///   - Track `if (cond)` lines for condition annotation
+fn parse_case_block(
+    var: String,
+    case_body: &[&str],
+    reset_state: Option<&str>,
+) -> Option<SvFsm> {
+    let mut states: Vec<String> = Vec::new();
+    let mut transitions: Vec<FsmTransition> = Vec::new();
+
+    let mut current_state: Option<String> = None;
+    let mut current_condition: Option<String> = None;
+
+    for line in case_body {
+        let t = line.trim();
+
+        // Skip blank lines and pure comments
+        if t.is_empty() || t.starts_with("//") {
+            continue;
+        }
+
+        if t == "endcase" {
+            break;
+        }
+
+        // Case label: "STATE_X:" or "STATE_X: begin" or "STATE_X: stmt"
+        if let Some((label, inline_stmt)) = extract_case_label_with_tail(t) {
+            current_state = Some(label.clone());
+            current_condition = None;
+            if label != "default" && !states.contains(&label) {
+                states.push(label.clone());
+            }
+            // Process any inline statement on the same line as the label
+            // e.g. `IDLE: state <= ACTIVE;`
+            if let Some(stmt) = inline_stmt {
+                if let Some(rhs) = extract_nba_rhs(stmt) {
+                    let lhs = nba_lhs(stmt);
+                    if lhs_is_state_var(&lhs, &var) && label != "default" {
+                        transitions.push(FsmTransition {
+                            from: label,
+                            to: rhs,
+                            condition: None,
+                        });
+                    }
+                }
+            }
+            continue;
+        }
+
+        // if (...) inside a case arm — capture for condition annotation
+        if t.starts_with("if") && t.contains('(') {
+            current_condition = Some(extract_paren_content(t));
+            continue;
+        }
+
+        // else resets condition (transition without condition on else branch)
+        if t.starts_with("else") {
+            current_condition = None;
+            continue;
+        }
+
+        // Non-blocking assignment to the case variable or next_state
+        if let Some(rhs) = extract_nba_rhs(t) {
+            let lhs = nba_lhs(t);
+            if lhs_is_state_var(&lhs, &var) {
+                if let Some(ref from) = current_state {
+                    if from != "default" {
+                        transitions.push(FsmTransition {
+                            from: from.clone(),
+                            to: rhs,
+                            condition: current_condition.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    if states.is_empty() {
+        return None;
+    }
+
+    // Determine initial state
+    let initial = reset_state
+        .map(|s| s.to_string())
+        .or_else(|| states.first().cloned())
+        .unwrap_or_default();
+
+    // Compute dead states: states with no outgoing transitions
+    let states_with_transitions: std::collections::HashSet<&str> =
+        transitions.iter().map(|t| t.from.as_str()).collect();
+
+    let dead_states: Vec<String> = states.iter()
+        .filter(|s| !states_with_transitions.contains(s.as_str()))
+        .cloned()
+        .collect();
+
+    let fsm_states: Vec<FsmState> = states.iter().map(|s| FsmState {
+        is_initial: *s == initial,
+        is_dead: dead_states.contains(s),
+        name: s.clone(),
+    }).collect();
+
+    Some(SvFsm {
+        name: var,
+        states: fsm_states,
+        transitions,
+        dead_states,
+    })
+}
+
+/// Return `(label, inline_stmt)` if `line` is a case label.
+///
+/// Handles:
+///   - `IDLE:`            → `("IDLE", None)`
+///   - `IDLE: begin`      → `("IDLE", None)`
+///   - `IDLE: state <= X;`→ `("IDLE", Some("state <= X;"))`
+///
+/// Returns `None` for `default:`, numeric literals, and lines that are
+/// not case labels.
+fn extract_case_label_with_tail(line: &str) -> Option<(String, Option<&str>)> {
+    let t = line.trim();
+    let colon_pos = t.find(':')?;
+    let label = t[..colon_pos].trim();
+
+    // Reject empty, multi-token, keyword, or literal labels
+    if label.is_empty()
+        || label.contains(' ')
+        || label.contains('(')
+        || label.contains(')')
+        || label.contains('=')
+        || label.contains('[')
+        || label.contains('"')
+        || label.contains('\'')     // numeric literals e.g. 2'b00
+        || label.contains('?')
+        || matches!(label, "begin" | "end" | "endcase" | "endmodule"
+                         | "default" | "assign" | "if" | "else")
+    {
+        return None;
+    }
+
+    let after = t[colon_pos + 1..].trim();
+    let inline = if after.is_empty() || after == "begin" || after.starts_with("//") {
+        None
+    } else {
+        Some(after)
+    };
+
+    Some((label.to_string(), inline))
+}
+
+/// Extract the RHS of a non-blocking assignment `lhs <= rhs;`.
+fn extract_nba_rhs(line: &str) -> Option<String> {
+    if !line.contains("<=") {
+        return None;
+    }
+    // Avoid confusing "<=" comparison with NBA: require that lhs is a
+    // simple identifier (no relational expression context).
+    let parts: Vec<&str> = line.splitn(2, "<=").collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let rhs = parts[1].trim().trim_end_matches(';').trim().to_string();
+    // Reject multi-token RHS that look like expressions (e.g., "a + b")
+    // or numeric literals — we only want state names (UPPER_SNAKE or
+    // short identifiers).
+    if rhs.is_empty() || rhs.contains(' ') || rhs.contains('+') || rhs.contains('-') {
+        return None;
+    }
+    Some(rhs)
+}
+
+/// Extract the LHS of `lhs <= rhs;`.
+fn nba_lhs(line: &str) -> String {
+    if let Some(pos) = line.find("<=") {
+        line[..pos].trim().to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// True when `lhs` is the FSM state variable or the conventional
+/// `next_state` / `nxt_state` alias.
+fn lhs_is_state_var(lhs: &str, var: &str) -> bool {
+    let l = lhs.trim();
+    l == var || l == "next_state" || l == "nxt_state"
+        || l == format!("next_{}", var) || l == format!("nxt_{}", var)
+}
+
+// ─── Markdown docs ───────────────────────────────────────────────────────────
 
 /// Generate a Markdown documentation page for a parsed SV file.
 pub fn generate_module_docs(result: &SvParseResult) -> String {
@@ -681,5 +1100,230 @@ endmodule
         assert!(doc.contains("simple"));
         assert!(doc.contains("clk"));
         assert!(doc.contains("data"));
+    }
+
+    // ── FSM extraction tests (Phase 6 M6.3) ─────────────────────────
+
+    // (h) Basic 3-state FSM with reset arm
+    #[test]
+    fn fsm_basic_three_states() {
+        let sv = "\
+module ctrl_fsm (
+    input  logic i_clk,
+    input  logic i_rst_n,
+    input  logic i_start,
+    output logic o_done
+);
+    typedef enum logic [1:0] {
+        IDLE   = 2'b00,
+        ACTIVE = 2'b01,
+        DONE   = 2'b10
+    } state_t;
+
+    state_t state;
+
+    always_ff @(posedge i_clk) begin
+        if (!i_rst_n) begin
+            state <= IDLE;
+        end else begin
+            case (state)
+                IDLE: begin
+                    if (i_start)
+                        state <= ACTIVE;
+                end
+                ACTIVE: begin
+                    state <= DONE;
+                end
+                DONE: begin
+                    state <= IDLE;
+                end
+            endcase
+        end
+    end
+endmodule
+";
+        let result = parse_sv(sv, "ctrl_fsm.sv");
+        assert_eq!(result.fsms.len(), 1);
+
+        let fsm = &result.fsms[0];
+        assert_eq!(fsm.name, "state");
+        assert_eq!(fsm.states.len(), 3);
+
+        // State names present
+        let names: Vec<&str> = fsm.states.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"IDLE"));
+        assert!(names.contains(&"ACTIVE"));
+        assert!(names.contains(&"DONE"));
+
+        // IDLE is initial (reset arm)
+        let idle = fsm.states.iter().find(|s| s.name == "IDLE").unwrap();
+        assert!(idle.is_initial);
+
+        // 3 transitions: IDLE->ACTIVE, ACTIVE->DONE, DONE->IDLE
+        assert_eq!(fsm.transitions.len(), 3);
+
+        let t_ia = fsm.transitions.iter().find(|t| t.from == "IDLE" && t.to == "ACTIVE").unwrap();
+        assert_eq!(t_ia.condition.as_deref(), Some("i_start"));
+
+        let t_ad = fsm.transitions.iter().find(|t| t.from == "ACTIVE" && t.to == "DONE").unwrap();
+        assert!(t_ad.condition.is_none());
+
+        // No dead states — all three have transitions
+        assert!(fsm.dead_states.is_empty());
+    }
+
+    // (i) Dead state detection
+    #[test]
+    fn fsm_dead_state_detected() {
+        let sv = "\
+module dead_state_fsm (
+    input  logic i_clk,
+    input  logic i_rst_n
+);
+    typedef enum logic [1:0] { S0, S1, S2_DEAD } fsm_t;
+    fsm_t state;
+
+    always_ff @(posedge i_clk) begin
+        if (!i_rst_n) begin
+            state <= S0;
+        end else begin
+            case (state)
+                S0: begin
+                    state <= S1;
+                end
+                S1: begin
+                    state <= S0;
+                end
+                S2_DEAD: begin
+                    // No transition out — dead state
+                end
+            endcase
+        end
+    end
+endmodule
+";
+        let result = parse_sv(sv, "dead_state_fsm.sv");
+        assert_eq!(result.fsms.len(), 1);
+
+        let fsm = &result.fsms[0];
+        assert_eq!(fsm.states.len(), 3);
+
+        // S2_DEAD has no outgoing transition
+        assert!(fsm.dead_states.contains(&"S2_DEAD".to_string()));
+        let s2 = fsm.states.iter().find(|s| s.name == "S2_DEAD").unwrap();
+        assert!(s2.is_dead);
+
+        // S0 and S1 are live
+        let s0 = fsm.states.iter().find(|s| s.name == "S0").unwrap();
+        assert!(!s0.is_dead);
+        let s1 = fsm.states.iter().find(|s| s.name == "S1").unwrap();
+        assert!(!s1.is_dead);
+    }
+
+    // (j) Initial state falls back to first case label when no reset arm
+    #[test]
+    fn fsm_initial_state_fallback_to_first_label() {
+        let sv = "\
+module no_reset_fsm (
+    input logic i_clk,
+    input logic i_go
+);
+    typedef enum { FIRST, SECOND, THIRD } st_t;
+    st_t state;
+
+    always_ff @(posedge i_clk) begin
+        case (state)
+            FIRST: begin
+                if (i_go)
+                    state <= SECOND;
+            end
+            SECOND: begin
+                state <= THIRD;
+            end
+            THIRD: begin
+                state <= FIRST;
+            end
+        endcase
+    end
+endmodule
+";
+        let result = parse_sv(sv, "no_reset_fsm.sv");
+        assert_eq!(result.fsms.len(), 1);
+
+        let fsm = &result.fsms[0];
+        assert_eq!(fsm.states.len(), 3);
+
+        // FIRST is initial because it is the first case label (no reset arm)
+        let first = fsm.states.iter().find(|s| s.name == "FIRST").unwrap();
+        assert!(first.is_initial, "FIRST should be initial (fallback to first label)");
+
+        // Others are not initial
+        for s in fsm.states.iter().filter(|s| s.name != "FIRST") {
+            assert!(!s.is_initial, "{} should not be initial", s.name);
+        }
+    }
+
+    // (k) next_state alias for state variable
+    #[test]
+    fn fsm_next_state_alias() {
+        let sv = "\
+module alias_fsm (
+    input  logic i_clk,
+    input  logic i_rst_n,
+    input  logic i_go
+);
+    typedef enum { WAIT, RUN, HALT } st_t;
+    st_t state, next_state;
+
+    always_ff @(posedge i_clk) begin
+        if (!i_rst_n)
+            state <= WAIT;
+        else
+            state <= next_state;
+    end
+
+    always_ff @(posedge i_clk) begin
+        case (state)
+            WAIT: begin
+                if (i_go)
+                    next_state <= RUN;
+            end
+            RUN: begin
+                next_state <= HALT;
+            end
+            HALT: begin
+                next_state <= WAIT;
+            end
+        endcase
+    end
+endmodule
+";
+        let result = parse_sv(sv, "alias_fsm.sv");
+        // Two always_ff blocks: the first (state <= ...) is trivial,
+        // the second should yield a case-based FSM on 'state'
+        // with next_state assignments captured.
+        let fsm_opt = result.fsms.iter().find(|f| !f.states.is_empty() && f.states.len() >= 3);
+        assert!(fsm_opt.is_some(), "expected at least one FSM with 3 states");
+
+        let fsm = fsm_opt.unwrap();
+        let names: Vec<&str> = fsm.states.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"WAIT"), "WAIT not found in {:?}", names);
+        assert!(names.contains(&"RUN"),  "RUN not found in {:?}", names);
+        assert!(names.contains(&"HALT"), "HALT not found in {:?}", names);
+    }
+
+    // (l) parse_sv on source without always_ff produces empty fsm list
+    #[test]
+    fn fsm_no_always_ff_yields_empty() {
+        let sv = "\
+module combinational (
+    input  logic [7:0] i_a,
+    output logic [7:0] o_b
+);
+    assign o_b = ~i_a;
+endmodule
+";
+        let result = parse_sv(sv, "comb.sv");
+        assert!(result.fsms.is_empty());
     }
 }
