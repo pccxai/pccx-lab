@@ -13,6 +13,7 @@
 pub mod isa_spec;
 pub mod api_spec;
 pub mod sv_parser;
+pub mod block_diagram;
 
 // ─── Unstable plugin API (Phase 1 M1.2) ──────────────────────────────
 //

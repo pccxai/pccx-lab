@@ -2,7 +2,8 @@
 // pccx-verification: end-to-end golden-model diff + robust config reader.
 //
 // Two sub-modules live here:
-//   * `golden_diff`    — NVIDIA-report §6.2 end-to-end correctness gate.
+//   * `golden_diff`    — end-to-end correctness gate (consultation
+//                        report §6.2).
 //   * `robust_reader`  — 4-level (Strict / Warn / Fix / Lenient) TOML
 //                        and JSON robustness policy used by the config
 //                        readers in `isa_spec` / `api_spec`.
@@ -45,7 +46,7 @@ pub trait VerificationGate {
 }
 
 /// The flagship gate: compares a trace to a `.ref.jsonl` profile per
-/// the NVIDIA-report §6.2 end-to-end contract.
+/// the consultation report §6.2 end-to-end contract.
 pub struct GoldenDiffGate {
     reference: Vec<golden_diff::RefProfileRow>,
 }

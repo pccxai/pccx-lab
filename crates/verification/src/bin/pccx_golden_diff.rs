@@ -1,4 +1,4 @@
-//! pccx_golden_diff — NVIDIA-report §6.2 end-to-end correctness gate.
+//! pccx_golden_diff — end-to-end correctness gate (consultation report §6.2).
 //!
 //! ```text
 //! pccx_golden_diff --emit-profile <trace.pccx> [--tolerance-pct N] > ref.jsonl

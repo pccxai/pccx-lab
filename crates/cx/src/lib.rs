@@ -69,30 +69,30 @@ impl<'a> Lexer<'a> {
             match ch {
                 '\n' => {
                     tokens.push(Token::Newline);
-                    self.pos += 1;
+                    self.pos += ch.len_utf8();
                 }
                 '/' if self.peek() == Some('/') => {
                     self.skip_line_comment();
                 }
                 '+' => {
                     tokens.push(Token::Plus);
-                    self.pos += 1;
+                    self.pos += ch.len_utf8();
                 }
                 '-' => {
                     tokens.push(Token::Minus);
-                    self.pos += 1;
+                    self.pos += ch.len_utf8();
                 }
                 '*' => {
                     tokens.push(Token::Star);
-                    self.pos += 1;
+                    self.pos += ch.len_utf8();
                 }
                 '/' => {
                     tokens.push(Token::Slash);
-                    self.pos += 1;
+                    self.pos += ch.len_utf8();
                 }
                 '%' => {
                     tokens.push(Token::Percent);
-                    self.pos += 1;
+                    self.pos += ch.len_utf8();
                 }
                 '=' if self.peek() == Some('=') => {
                     tokens.push(Token::EqEq);
@@ -100,15 +100,15 @@ impl<'a> Lexer<'a> {
                 }
                 '=' => {
                     tokens.push(Token::Eq);
-                    self.pos += 1;
+                    self.pos += ch.len_utf8();
                 }
                 '(' => {
                     tokens.push(Token::LParen);
-                    self.pos += 1;
+                    self.pos += ch.len_utf8();
                 }
                 ')' => {
                     tokens.push(Token::RParen);
-                    self.pos += 1;
+                    self.pos += ch.len_utf8();
                 }
                 '0'..='9' => {
                     tokens.push(self.read_number()?);
@@ -117,7 +117,7 @@ impl<'a> Lexer<'a> {
                     tokens.push(self.read_ident());
                 }
                 _ => {
-                    self.pos += 1; // skip unknown
+                    self.pos += ch.len_utf8(); // skip unknown
                 }
             }
         }
@@ -126,35 +126,45 @@ impl<'a> Lexer<'a> {
     }
 
     fn current(&self) -> char {
-        self.src.as_bytes()[self.pos] as char
+        self.src[self.pos..].chars().next().unwrap_or('\0')
     }
 
     fn peek(&self) -> Option<char> {
-        self.src.as_bytes().get(self.pos + 1).map(|&b| b as char)
+        self.src[self.pos..].chars().nth(1)
     }
 
     fn skip_whitespace_inline(&mut self) {
-        while self.pos < self.src.len() && matches!(self.current(), ' ' | '\t' | '\r') {
-            self.pos += 1;
+        while self.pos < self.src.len() {
+            let ch = self.current();
+            if !matches!(ch, ' ' | '\t' | '\r') {
+                break;
+            }
+            self.pos += ch.len_utf8();
         }
     }
 
     fn skip_line_comment(&mut self) {
-        while self.pos < self.src.len() && self.current() != '\n' {
-            self.pos += 1;
+        while self.pos < self.src.len() {
+            let ch = self.current();
+            if ch == '\n' {
+                break;
+            }
+            self.pos += ch.len_utf8();
         }
     }
 
     fn read_number(&mut self) -> Result<Token, CxError> {
         let start = self.pos;
         let mut has_dot = false;
-        while self.pos < self.src.len()
-            && (self.current().is_ascii_digit() || self.current() == '.')
-        {
-            if self.current() == '.' {
+        while self.pos < self.src.len() {
+            let ch = self.current();
+            if !ch.is_ascii_digit() && ch != '.' {
+                break;
+            }
+            if ch == '.' {
                 has_dot = true;
             }
-            self.pos += 1;
+            self.pos += ch.len_utf8();
         }
         let s = &self.src[start..self.pos];
         if has_dot {
@@ -172,10 +182,12 @@ impl<'a> Lexer<'a> {
 
     fn read_ident(&mut self) -> Token {
         let start = self.pos;
-        while self.pos < self.src.len()
-            && (self.current().is_alphanumeric() || self.current() == '_')
-        {
-            self.pos += 1;
+        while self.pos < self.src.len() {
+            let ch = self.current();
+            if !ch.is_alphanumeric() && ch != '_' {
+                break;
+            }
+            self.pos += ch.len_utf8();
         }
         let s = &self.src[start..self.pos];
         match s {
@@ -322,7 +334,7 @@ impl Parser {
     fn parse_unary(&mut self) -> Result<Expr, CxError> {
         if self.check(&Token::Minus) {
             self.advance();
-            Ok(Expr::UnaryMinus(Box::new(self.parse_primary()?)))
+            Ok(Expr::UnaryMinus(Box::new(self.parse_unary()?)))
         } else {
             self.parse_primary()
         }
@@ -463,18 +475,14 @@ impl CxRuntime {
                 BinOp::Add => Ok(Value::Int(a + b)),
                 BinOp::Sub => Ok(Value::Int(a - b)),
                 BinOp::Mul => Ok(Value::Int(a * b)),
-                BinOp::Div => {
-                    if *b == 0 {
-                        return Err(CxError::Runtime("division by zero".into()));
-                    }
-                    Ok(Value::Int(a / b))
-                }
-                BinOp::Mod => {
-                    if *b == 0 {
-                        return Err(CxError::Runtime("modulo by zero".into()));
-                    }
-                    Ok(Value::Int(a % b))
-                }
+                BinOp::Div => a
+                    .checked_div(*b)
+                    .map(Value::Int)
+                    .ok_or_else(|| CxError::Runtime("integer division overflow or division by zero".into())),
+                BinOp::Mod => a
+                    .checked_rem(*b)
+                    .map(Value::Int)
+                    .ok_or_else(|| CxError::Runtime("integer modulo overflow or modulo by zero".into())),
                 BinOp::Eq => Ok(Value::Int(if a == b { 1 } else { 0 })),
             },
             _ => {
@@ -492,7 +500,12 @@ impl CxRuntime {
                         }
                         Ok(Value::Float(a / b))
                     }
-                    BinOp::Mod => Ok(Value::Float(a % b)),
+                    BinOp::Mod => {
+                        if b == 0.0 {
+                            return Err(CxError::Runtime("modulo by zero".into()));
+                        }
+                        Ok(Value::Float(a % b))
+                    }
                     BinOp::Eq => Ok(Value::Int(if (a - b).abs() < f64::EPSILON {
                         1
                     } else {
@@ -601,5 +614,155 @@ mod tests {
         assert_eq!(r.value, "11");
         assert_eq!(r.variables.get("x").unwrap(), "5");
         assert_eq!(r.variables.get("y").unwrap(), "10");
+    }
+
+    #[test]
+    fn test_utf8_korean_comment_and_identifier() {
+        // Korean comment: lexer must skip multi-byte chars without panicking
+        assert_eq!(run("// 한글 주석\n42").unwrap().to_string(), "42");
+        // Mixed identifier starting with ASCII, continuing with Korean
+        // is_alphanumeric() accepts Hangul so read_ident must advance
+        // by ch.len_utf8(), not 1
+        let r = run("let x한 = 7\nx한 + 3").unwrap();
+        assert_eq!(r.to_string(), "10");
+    }
+
+    #[test]
+    fn test_i64_min_div_neg1_overflow() {
+        let rt = CxRuntime::new();
+        assert!(
+            rt.apply_binop(BinOp::Div, Value::Int(i64::MIN), Value::Int(-1))
+                .is_err()
+        );
+        assert!(
+            rt.apply_binop(BinOp::Mod, Value::Int(i64::MIN), Value::Int(-1))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_float_mod_by_zero() {
+        assert!(run("1.0 % 0.0").is_err());
+    }
+
+    #[test]
+    fn test_double_unary_minus() {
+        assert_eq!(run("--5").unwrap().to_string(), "5");
+    }
+
+    // ── Equality operator ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_equality_operator() {
+        assert_eq!(run("3 == 3").unwrap().to_string(), "1");
+        assert_eq!(run("3 == 4").unwrap().to_string(), "0");
+        assert_eq!(run("let a = 10\nlet b = 10\na == b").unwrap().to_string(), "1");
+    }
+
+    // ── UTF-8 safety ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_utf8_korean_comment() {
+        // Korean comment followed by code on the next line
+        let result = run("// 한글 코멘트\nlet x = 1 + 2\nx").unwrap();
+        assert_eq!(result.to_string(), "3");
+    }
+
+    #[test]
+    fn test_utf8_emoji_comment() {
+        // Emoji (4-byte UTF-8) inside a comment must not panic
+        let result = run("// 🚀 launch\nlet y = 42\ny").unwrap();
+        assert_eq!(result.to_string(), "42");
+    }
+
+    #[test]
+    fn test_utf8_mixed_ascii_and_multibyte_comment() {
+        // Mixed ASCII + Korean + emoji on the same comment line
+        let result = run("// hello 안녕 world 🌍\n7 + 3").unwrap();
+        assert_eq!(result.to_string(), "10");
+    }
+
+    #[test]
+    fn test_utf8_multibyte_before_eof() {
+        // Multi-byte comment at end of source with no trailing newline
+        let r = run_detailed("let x = 1 // 끝").unwrap();
+        assert_eq!(r.value, "1");
+        assert_eq!(r.variables.get("x").unwrap(), "1");
+    }
+
+    #[test]
+    fn test_utf8_only_multibyte_comments() {
+        // Source consisting entirely of multi-byte comments, no executable code
+        let result = run("// 전부 주석\n// 한글만\n// 🎯🔥").unwrap();
+        assert_eq!(result.to_string(), "()");
+    }
+
+    #[test]
+    fn test_utf8_hangul_in_identifier() {
+        // Hangul continuation chars in identifier (ASCII start required)
+        let result = run("let v한글 = 99\nv한글").unwrap();
+        assert_eq!(result.to_string(), "99");
+    }
+
+    // ── Edge cases ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_empty_input() {
+        assert_eq!(run("").unwrap().to_string(), "()");
+    }
+
+    #[test]
+    fn test_whitespace_only_input() {
+        assert_eq!(run("   \t\t  \n  \n  ").unwrap().to_string(), "()");
+    }
+
+    #[test]
+    fn test_slash_vs_comment() {
+        // Single slash is division; double slash is line comment
+        assert_eq!(run("10 / 2").unwrap().to_string(), "5");
+        assert_eq!(run("// 10 / 2\n99").unwrap().to_string(), "99");
+    }
+
+    #[test]
+    fn test_deeply_nested_parentheses() {
+        assert_eq!(run("((((1 + 2))))").unwrap().to_string(), "3");
+        assert_eq!(run("(((2 * (3 + 1)) - 1))").unwrap().to_string(), "7");
+    }
+
+    // ── End-to-end evaluation ───────────────────────────────────────────────
+
+    #[test]
+    fn test_e2e_variable_chain() {
+        // x = 10, y = x * 2, result = y => 20
+        let result = run("let x = 10\nlet y = x * 2\ny").unwrap();
+        assert_eq!(result.to_string(), "20");
+    }
+
+    #[test]
+    fn test_e2e_all_operators() {
+        // Exercise every binary operator in a single program
+        let src = "let a = 10\nlet b = 3\nlet sum = a + b\nlet diff = a - b\nlet prod = a * b\nlet quot = a / b\nlet rem = a % b\nlet eq = a == a\nrem + eq";
+        let r = run_detailed(src).unwrap();
+        // rem = 10 % 3 = 1, eq = 10 == 10 = 1, result = 1 + 1 = 2
+        assert_eq!(r.value, "2");
+        assert_eq!(r.variables.get("sum").unwrap(), "13");
+        assert_eq!(r.variables.get("diff").unwrap(), "7");
+        assert_eq!(r.variables.get("prod").unwrap(), "30");
+        assert_eq!(r.variables.get("quot").unwrap(), "3");
+        assert_eq!(r.variables.get("rem").unwrap(), "1");
+        assert_eq!(r.variables.get("eq").unwrap(), "1");
+    }
+
+    #[test]
+    fn test_e2e_float_arithmetic() {
+        let result = run("1.5 + 2.5").unwrap();
+        assert_eq!(result.to_string(), "4");
+    }
+
+    #[test]
+    fn test_e2e_mixed_int_float_promotion() {
+        // int + float promotes to float
+        let result = run("let a = 2\nlet b = 3.0\na + b").unwrap();
+        assert_eq!(result.to_string(), "5");
     }
 }

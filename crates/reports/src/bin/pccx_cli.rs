@@ -179,7 +179,7 @@ fn main() -> anyhow::Result<()> {
         println!("  Detected {} high-occupancy DMA intervals:", bottlenecks.len());
         for (i, ev) in bottlenecks.iter().take(5).enumerate() {
             println!("  [{i}] Core={} Type={} Start={} Duration={}",
-                ev.core_id, ev.event_type, ev.start_cycle, ev.duration);
+                ev.core_id.get(), ev.event_type, ev.start_cycle.get(), ev.duration.get());
         }
         if bottlenecks.len() > 5 {
             println!("  ... and {} more.", bottlenecks.len() - 5);
@@ -232,8 +232,8 @@ fn main() -> anyhow::Result<()> {
         println!();
         println!("── First Event ─────────────────────────────────────────");
         println!("  Core={} Type={} Start={} Duration={}",
-            first.core_id, first.event_type, first.start_cycle, first.duration);
-        println!("  Type ID (flat buf): {}", first.type_id());
+            first.core_id.get(), first.event_type, first.start_cycle.get(), first.duration.get());
+        println!("  Type ID (flat buf): {}", first.type_id().get());
     }
 
     if emit_report_md {
