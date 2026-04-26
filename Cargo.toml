@@ -8,6 +8,7 @@ members = [
     "crates/remote",
     "crates/lsp",
     "crates/cx",
+    "crates/schema",
     "crates/uvm_bridge",
     "crates/ai_copilot",
     "ui/src-tauri"
