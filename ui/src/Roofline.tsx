@@ -2,10 +2,10 @@ import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import * as echarts from "echarts";
 import { useTheme } from "./ThemeContext";
+import { useRafScheduler } from "./hooks/useRafScheduler";
+import { useVisibilityGate } from "./hooks/useVisibilityGate";
+import { useLiveWindow } from "./hooks/useLiveWindow";
 import { ActivitySquare, Zap, Cpu, HardDrive, Layers } from "lucide-react";
-
-// Shape of `fetch_live_window` (see core/src/live_window.rs).
-interface LiveSample { ts_ns: number; mac_util: number; dma_bw: number; stall_pct: number }
 
 // Shape of a single trace event pulled from the flat-buffer v2 payload.
 // Mirrors `FlameGraph.tsx` parseFlatBuffer output so both panels consume
@@ -32,9 +32,9 @@ interface RooflineBand {
 }
 
 // pccx v002 · KV260 target roofline constants
-const PEAK_TOPS   = 1024;   // 32×32 MAC @ 1 GHz = 1024 GOPS
-const PEAK_DDR_BW = 21.3;   // LPDDR4-2400 × 64-bit effective
-const PEAK_URAM_BW= 112.0;  // 64 URAM × 72b @ 250 MHz
+const PEAK_TOPS   = 1024;   // 32x32 MAC @ 1 GHz = 1024 GOPS
+const PEAK_DDR_BW = 21.3;   // LPDDR4-2400 x 64-bit effective
+const PEAK_URAM_BW= 112.0;  // 64 URAM x 72b @ 250 MHz
 const RIDGE_DDR   = PEAK_TOPS / PEAK_DDR_BW;
 const RIDGE_URAM  = PEAK_TOPS / PEAK_URAM_BW;
 
@@ -123,7 +123,7 @@ function parseTraceEvents(buf: Uint8Array): TraceEvent[] {
  *  from the CUPTI-style FLOP-per-cycle heuristic: MAC_COMPUTE events
  *  run at the peak array width (1024 ops / cycle on pccx v002);
  *  DMA events move a constant bytes-per-cycle. Achieved GOPS is the
- *  total ops over the kernel's dwell in ns → GOPS conversion at the
+ *  total ops over the kernel's dwell in ns -> GOPS conversion at the
  *  1 GHz pccx reference clock. */
 function reduceTraceToKernels(events: TraceEvent[]): Kernel[] {
   if (events.length === 0) return [];
@@ -161,7 +161,7 @@ function reduceTraceToKernels(events: TraceEvent[]): Kernel[] {
     const seconds = cy / (CLOCK_GHZ * 1e9);
     if (typeId === TYPE_MAC_COMPUTE) {
       // Compute-bound kernel — intensity mirrors pccx's typical GEMM
-      // working set (≈128 GOPS/B at 32×32 + W4A8).
+      // working set (approx 128 GOPS/B at 32x32 + W4A8).
       const ops = cy * MACS_PER_CYCLE * OPS_PER_MAC;
       kernels.push({
         name: `MAC_COMPUTE (${cy} cy)`,
@@ -173,7 +173,7 @@ function reduceTraceToKernels(events: TraceEvent[]): Kernel[] {
       });
     } else if (typeId === TYPE_DMA_READ || typeId === TYPE_DMA_WRITE) {
       const bytes = cy * AXI_BPC;
-      // DMA kernels: intensity ≈ ops/bytes — near zero on pure DMA but
+      // DMA kernels: intensity approx ops/bytes — near zero on pure DMA but
       // we bias up to 0.25 so the marker lands inside the chart log-AI
       // range (min = 0.05).
       const gbps = seconds > 0 ? (bytes / 1e9 / seconds) : 0;
@@ -199,10 +199,10 @@ function reduceTraceToKernels(events: TraceEvent[]): Kernel[] {
   return kernels;
 }
 
-/** 16 log-AI × 8 log-GOPS duration-weighted heatmap (Nsight Compute
- *  style). Emits ECharts data tuples `[x_bin, y_bin, weight]` plus the
- *  bin edge labels. Empty trace yields an empty dataset (never
- *  synthesised — per the Yuan OSDI 2014 loud-fallback rule). */
+/** 16 log-AI x 8 log-GOPS duration-weighted heatmap. Emits ECharts
+ *  data tuples `[x_bin, y_bin, weight]` plus the bin edge labels.
+ *  Empty trace yields an empty dataset (never synthesised — per the
+ *  Yuan OSDI 2014 loud-fallback rule). */
 function buildHeatmap(kernels: Kernel[]): {
   cells: Array<[number, number, number]>;
   xLabels: string[];
@@ -230,8 +230,7 @@ function buildHeatmap(kernels: Kernel[]): {
     if (lx < xMin || lx > xMax || ly < yMin || ly > yMax) continue;
     const bx = Math.min(NX - 1, Math.max(0, Math.floor((lx - xMin) / (xMax - xMin) * NX)));
     const by = Math.min(NY - 1, Math.max(0, Math.floor((ly - yMin) / (yMax - yMin) * NY)));
-    // Duration-weighted: one-cycle spans must not dominate the view
-    // (Nsight Compute convention).
+    // Duration-weighted: one-cycle spans must not dominate the view.
     const w = Math.max(1, k.durationCycles ?? 1);
     grid[bx][by] += w;
     if (grid[bx][by] > maxWeight) maxWeight = grid[bx][by];
@@ -249,6 +248,10 @@ export function Roofline() {
   const theme = useTheme();
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
+  const sched = useRafScheduler();
+  const visible = useVisibilityGate(chartRef);
+  const liveSnap = useLiveWindow();
+
   const [running, setRunning] = useState(false);
   const [selectedKind, setSelectedKind] = useState<Kernel["kind"] | "all">("all");
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -301,11 +304,11 @@ export function Roofline() {
     return () => { unsub?.(); };
   }, [loadPrimary]);
 
-  // "Compare .pccx…" — mirror of FlameGraph.tsx:177,193. Loads a second
-  // trace into the core/src-tauri trace_b slot via `load_pccx_alt` and
-  // reads the flat buffer back via `fetch_trace_payload_b`. Drives the
-  // dashed second-ceiling overlay (CARM-style workload comparison).
-  const loadAlt = async () => {
+  // "Compare .pccx…" — loads a second trace into the core/src-tauri
+  // trace_b slot via `load_pccx_alt` and reads the flat buffer back via
+  // `fetch_trace_payload_b`. Drives the dashed second-ceiling overlay
+  // (CARM-style workload comparison).
+  const loadAlt = useCallback(async () => {
     setAltError(null);
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -329,8 +332,8 @@ export function Roofline() {
     } catch (e: any) {
       setAltError(`${e}`);
     }
-  };
-  const clearAlt = () => { setAltEvents(null); setAltLabel(null); setAltError(null); };
+  }, []);
+  const clearAlt = useCallback(() => { setAltEvents(null); setAltLabel(null); setAltError(null); }, []);
 
   // Derive kernels from the loaded trace via `useMemo` — no more
   // compile-time `KERNELS` literal. Falls back to the stub only when
@@ -355,11 +358,9 @@ export function Roofline() {
   // Heatmap grid — recomputed whenever the live kernels change.
   const heatmap = useMemo(() => buildHeatmap(liveKernels), [liveKernels]);
 
-  useEffect(() => {
-    if (!chartRef.current) return;
-    chartInstance.current?.dispose();
-    chartInstance.current = echarts.init(chartRef.current);
-
+  // Build the full ECharts option as a memo — decoupled from init so
+  // the chart instance is created only once.
+  const chartOption = useMemo<echarts.EChartsCoreOption>(() => {
     // Roofline lines
     const ddrMem   = [[0.05, 0.05 * PEAK_DDR_BW],  [RIDGE_DDR,  PEAK_TOPS]];
     const ddrComp  = [[RIDGE_DDR,  PEAK_TOPS],     [10000,      PEAK_TOPS]];
@@ -373,7 +374,7 @@ export function Roofline() {
       ? Math.min(1.0, Math.max(0.2, altKernels.reduce((m, k) => Math.max(m, k.achieved), 0) / PEAK_TOPS))
       : 0;
 
-    const option: echarts.EChartsCoreOption = {
+    return {
       backgroundColor: "transparent",
       grid: { left: 64, right: 16, top: 44, bottom: 52 },
       tooltip: {
@@ -437,9 +438,6 @@ export function Roofline() {
         splitLine: { show: true, lineStyle: { color: theme.borderDim, type: "dashed" } },
         axisLine: { lineStyle: { color: theme.border } },
       },
-      // Optional secondary (categorical) axes wired only to the
-      // heatmap series — ECharts does not let one chart mix log + cat
-      // on the same axis, so the heatmap uses `xAxisIndex: 1`.
       ...(heatmap.cells.length > 0 ? {
         singleAxis: [],
       } : {}),
@@ -456,11 +454,10 @@ export function Roofline() {
         ] },
       } : undefined,
       series: [
-        // (0) Duration-weighted AI × GOPS heatmap — background layer
-        //     that turns the roofline into an Nsight-Compute style
-        //     hot-region map. Uses log-binned categorical axes via
-        //     ECharts' coord system, converted back to the log scale
-        //     at draw time by mapping bx/by -> 10^(log range * bin).
+        // (0) Duration-weighted AI x GOPS heatmap — background layer
+        //     that turns the roofline into a hot-region map. Uses
+        //     log-binned categorical axes via ECharts' coord system,
+        //     converted back to the log scale at draw time.
         {
           name: "AI heatmap",
           type: "heatmap",
@@ -477,10 +474,10 @@ export function Roofline() {
           silent: false,
           z: 1,
         },
-        // (1) Per-kernel duration bands — Intel-Advisor trajectory
-        //     segments. Each kernel becomes a vertical rect spanning
-        //     its achieved GOPS ±20 % (proxy for per-phase variance
-        //     since pccx does not yet track per-cycle intensity).
+        // (1) Per-kernel duration bands — trajectory segments. Each
+        //     kernel becomes a vertical rect spanning its achieved
+        //     GOPS +/- 20 % (proxy for per-phase variance since pccx
+        //     does not yet track per-cycle intensity).
         {
           name: "Kernel span",
           type: "custom",
@@ -556,9 +553,8 @@ export function Roofline() {
           emphasis: { scale: 1.6, itemStyle: { borderColor: theme.accent, borderWidth: 2 } },
           z: 5,
         },
-        // (8+) Dual-workload overlay — dashed alt ceilings + alt
-        //      scatter. Only present when `load_pccx_alt` has been
-        //      called.
+        // Dual-workload overlay — dashed alt ceilings + alt scatter.
+        // Only present when `load_pccx_alt` has been called.
         ...(altKernels ? [
           {
             name: "Alt DDR ceiling",
@@ -599,10 +595,10 @@ export function Roofline() {
             z: 4,
           },
         ] : []),
-        // (N+) Hierarchical ceilings — one dashed line per memory tier
-        //      emitted by `analyze_roofline_hierarchical` (Ilic 2014
-        //      CARM / Yang 2020 Hierarchical). Dwell-weighted opacity
-        //      so tiers the kernel never touches fade out.
+        // Hierarchical ceilings — one dashed line per memory tier
+        // emitted by `analyze_roofline_hierarchical` (Ilic 2014
+        // CARM / Yang 2020 Hierarchical). Dwell-weighted opacity
+        // so tiers the kernel never touches fade out.
         ...(hBands.length > 0 ? [{
           name: "Hier. ceilings",
           type: "line" as const,
@@ -622,55 +618,74 @@ export function Roofline() {
         }] : []),
       ],
     };
-    chartInstance.current.setOption(option, true);
-    const onResize = () => chartInstance.current?.resize();
-    window.addEventListener("resize", onResize);
-    chartInstance.current.on("mouseover", (p: any) => p.componentSubType === "scatter" && setHoverIdx(p.dataIndex));
-    chartInstance.current.on("mouseout", () => setHoverIdx(null));
-    return () => { window.removeEventListener("resize", onResize); chartInstance.current?.dispose(); };
   }, [theme, filteredKernels, heatmap, altKernels, hBands]);
 
-  // Round-4 T-1: the "Live" button polls `fetch_live_window` instead
-  // of jittering kernel points with RNG.  Each poll takes the average
-  // mac_util / dma_bw across the ring and re-scales every kernel's
-  // achieved GOPS by `mac_util` (keeps the scatter anchored to the
-  // real trace). Empty samples (no trace loaded) restore the static
-  // kernel points so the panel never renders invented noise.
-  const [liveUtil, setLiveUtil] = useState<number | null>(null);
+  // Effect 1: init-once — create chart, attach hover handlers, set up
+  // ResizeObserver debounced through RAF scheduler, dispose on unmount.
   useEffect(() => {
-    if (!running || !chartInstance.current) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const rows: LiveSample[] = await invoke("fetch_live_window", { windowCycles: 256 });
-        if (cancelled) return;
-        if (rows.length === 0) { setLiveUtil(null); return; }
-        const mac = rows.reduce((a, r) => a + r.mac_util, 0) / rows.length;
-        setLiveUtil(mac);
-        const pts = filteredKernels.map(k => {
-          const ceiling = k.intensity < RIDGE_DDR ? k.intensity * PEAK_DDR_BW : PEAK_TOPS;
-          // Scale achieved GOPS by the live MAC utilisation, clamped
-          // to the kernel's own ceiling.  Panel still shows per-kernel
-          // deltas while being driven by real trace events.
-          const perf = Math.min(ceiling * 0.995, k.achieved * Math.max(0.05, mac));
-          return { value: [k.intensity, perf],
-                   name: k.name,
-                   itemStyle: { color: KIND_COLOR[k.kind] },
-                   label: { show: true, formatter: k.name, color: theme.text, fontSize: 9, position: "top" as const } };
-        });
-        // Scatter is now series index 5 (after heatmap, kernel-span,
-        // DDR, URAM, compute). Use `setOption` with an explicit
-        // `series` entry keyed by name so the live update lands on
-        // the right series regardless of future reordering.
-        chartInstance.current?.setOption({ series: [{ name: "Kernels", data: pts }] });
-      } catch {
-        if (!cancelled) setLiveUtil(null);
-      }
+    const el = chartRef.current;
+    if (!el) return;
+    const chart = echarts.init(el);
+    chartInstance.current = chart;
+
+    chart.on("mouseover", (p: any) => {
+      if (p.componentSubType === "scatter") setHoverIdx(p.dataIndex);
+    });
+    chart.on("mouseout", () => setHoverIdx(null));
+
+    // ResizeObserver -> RAF-coalesced resize (replaces window resize)
+    const ro = new ResizeObserver(() => {
+      sched.schedule("roofline-resize", () => chart.resize());
+    });
+    ro.observe(el);
+
+    return () => {
+      ro.disconnect();
+      sched.cancel("roofline-resize");
+      chart.dispose();
+      chartInstance.current = null;
     };
-    poll();
-    const id = setInterval(poll, 500);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [running, filteredKernels, theme.text]);
+    // Stable refs only — intentionally run once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Effect 2: sync option into the existing chart instance. Full
+  // replace (notMerge) so toggling Compare on/off cleanly removes alt
+  // series, legend entries, and visualMap without stale ghosts. This is
+  // cheap since the init-once split already eliminated the dispose/init
+  // cycle — the memoised option only changes on theme/filter/data.
+  useEffect(() => {
+    const chart = chartInstance.current;
+    if (!chart) return;
+    chart.setOption(chartOption, true);
+  }, [chartOption]);
+
+  // Derive live MAC utilisation from the shared useLiveWindow store.
+  const liveUtil = useMemo<number | null>(() => {
+    if (!running || liveSnap.samples.length === 0) return null;
+    return liveSnap.samples.reduce((a, r) => a + r.mac_util, 0) / liveSnap.samples.length;
+  }, [running, liveSnap]);
+
+  // Effect 3: live data update — scale kernel scatter by MAC utilisation
+  // from the shared live window. Gated by visibility + running state.
+  useEffect(() => {
+    const chart = chartInstance.current;
+    if (!running || !visible || !chart || liveUtil === null) return;
+    const pts = filteredKernels.map(k => {
+      const ceiling = k.intensity < RIDGE_DDR ? k.intensity * PEAK_DDR_BW : PEAK_TOPS;
+      // Scale achieved GOPS by the live MAC utilisation, clamped to the
+      // kernel's own ceiling. Panel still shows per-kernel deltas while
+      // being driven by real trace events.
+      const perf = Math.min(ceiling * 0.995, k.achieved * Math.max(0.05, liveUtil));
+      return {
+        value: [k.intensity, perf],
+        name: k.name,
+        itemStyle: { color: KIND_COLOR[k.kind] },
+        label: { show: true, formatter: k.name, color: theme.text, fontSize: 9, position: "top" as const },
+      };
+    });
+    chart.setOption({ series: [{ name: "Kernels", data: pts }] }, { lazyUpdate: true });
+  }, [running, visible, liveUtil, filteredKernels, theme.text]);
 
   const totals = useMemo(() => {
     const avgUtil = filteredKernels.reduce((a, k) => {
@@ -684,9 +699,11 @@ export function Roofline() {
 
   const isStubMode = liveKernels === STUB_KERNELS;
 
+  const handleToggleRunning = useCallback(() => setRunning(r => !r), []);
+
   return (
     <div className="w-full h-full flex flex-col" style={{ background: theme.bgPanel }}>
-      <div className="flex items-center px-4 h-10 shrink-0" style={{ borderBottom: `1px solid ${theme.border}`, background: theme.bgSurface }}>
+      <div className="flex items-center px-4 h-10 shrink-0" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bgSurface }}>
         <ActivitySquare size={16} className="mr-2" style={{ color: theme.warning }} />
         <span style={{ fontWeight: 600, fontSize: 13 }}>Roofline Analyser — pccx v002 · KV260</span>
         <span style={{ fontSize: 10, color: theme.textMuted, marginLeft: 12 }}>
@@ -702,7 +719,7 @@ export function Roofline() {
               fontSize: 9, fontWeight: 700, letterSpacing: "0.04em",
               padding: "1px 6px", borderRadius: 3,
               background: `${theme.error}22`, color: theme.error,
-              border: `1px solid ${theme.error}55`, marginLeft: 12,
+              border: `0.5px solid ${theme.error}55`, marginLeft: 12,
             }}
             title="No .pccx trace is loaded — kernel points below are a fixed demo reference.">
             (synthetic)
@@ -716,7 +733,7 @@ export function Roofline() {
                 padding: "3px 9px", fontSize: 10, borderRadius: 3,
                 background: selectedKind === k ? theme.accentBg : "transparent",
                 color: selectedKind === k ? theme.accent : theme.textMuted,
-                border: `1px solid ${selectedKind === k ? theme.accent : theme.border}`,
+                border: `0.5px solid ${selectedKind === k ? theme.accent : theme.borderSubtle}`,
                 fontWeight: selectedKind === k ? 700 : 500, cursor: "pointer",
               }}>{k}</button>
           ))}
@@ -726,13 +743,13 @@ export function Roofline() {
           style={{
             fontSize: 10, padding: "3px 9px", borderRadius: 3, marginRight: 8,
             background: theme.bgSurface, color: theme.textDim,
-            border: `1px solid ${theme.border}`, cursor: "pointer",
+            border: `0.5px solid ${theme.borderSubtle}`, cursor: "pointer",
           }}
           title="Open a second .pccx to overlay its ceilings + kernel scatter (CARM dual-workload comparison).">
           Compare .pccx…
         </button>
         {altLabel && (
-          <span style={{ fontSize: 9, color: theme.textDim, fontFamily: "monospace", marginRight: 6 }} title={altLabel}>
+          <span style={{ fontSize: 9, color: theme.textDim, fontFamily: theme.fontMono, marginRight: 6 }} title={altLabel}>
             alt: {altLabel}
             <button aria-label="Clear compare trace" onClick={clearAlt} style={{ marginLeft: 4, color: theme.textMuted }}>×</button>
           </span>
@@ -753,7 +770,7 @@ export function Roofline() {
           </span>
         )}
         <button
-          onClick={() => setRunning(!running)}
+          onClick={handleToggleRunning}
           className="flex items-center gap-2 px-3 py-1 rounded text-xs font-semibold transition-all"
           style={{ background: running ? theme.error : theme.success, color: "#fff" }}
         >
@@ -764,11 +781,11 @@ export function Roofline() {
       <div className="flex-1 grid" style={{ gridTemplateColumns: "1fr 320px", minHeight: 0 }}>
         <div className="relative p-3" style={{ minHeight: 0 }}>
           <div ref={chartRef} className="w-full h-full"
-            style={{ border: `1px solid ${theme.border}`, borderRadius: 6, background: theme.bg }} />
+            style={{ border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 6, background: theme.bg }} />
         </div>
 
-        <div className="flex flex-col" style={{ borderLeft: `1px solid ${theme.border}`, background: theme.bg, minHeight: 0 }}>
-          <div className="shrink-0 p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
+        <div className="flex flex-col" style={{ borderLeft: `0.5px solid ${theme.borderSubtle}`, background: theme.bg, minHeight: 0 }}>
+          <div className="shrink-0 p-3" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
             <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 6, letterSpacing: "0.05em" }}>SUMMARY</div>
             <div className="grid grid-cols-3 gap-2 text-center">
               <SummaryCell label="kernels"   value={filteredKernels.length.toString()} color={theme.text} />
@@ -781,11 +798,11 @@ export function Roofline() {
           </div>
 
           {hBands.length > 0 && (
-            <div className="shrink-0 p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
+            <div className="shrink-0 p-3" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
               <div style={{ fontSize: 10, color: theme.textMuted, marginBottom: 6, letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: 6 }}>
                 <Layers size={10}/> HIERARCHY (Ilic 2014 · Yang 2020)
               </div>
-              <table style={{ width: "100%", fontSize: 10, fontFamily: "ui-monospace, monospace" }}>
+              <table style={{ width: "100%", fontSize: 10, fontFamily: theme.fontMono }}>
                 <tbody>
                   {hBands.map(b => (
                     <tr key={b.level} style={{ color: b.dwell_cycles > 0 ? theme.text : theme.textFaint }}>
@@ -801,9 +818,9 @@ export function Roofline() {
           )}
 
           <div className="flex-1 overflow-auto">
-            <table style={{ width: "100%", fontSize: 10, borderCollapse: "collapse", fontFamily: "ui-monospace, monospace" }}>
+            <table style={{ width: "100%", fontSize: 10, borderCollapse: "collapse", fontFamily: theme.fontMono }}>
               <thead style={{ position: "sticky", top: 0, background: theme.bgSurface }}>
-                <tr style={{ borderBottom: `1px solid ${theme.border}`, color: theme.textMuted }}>
+                <tr style={{ borderBottom: `0.5px solid ${theme.borderSubtle}`, color: theme.textMuted }}>
                   <th style={{ padding: "6px 8px", textAlign: "left" }}>kernel</th>
                   <th style={{ padding: "6px 8px", textAlign: "right" }}>AI</th>
                   <th style={{ padding: "6px 8px", textAlign: "right" }}>GOPS</th>
@@ -818,7 +835,7 @@ export function Roofline() {
                   return (
                     <tr key={i}
                       style={{ background: hit ? theme.accentBg : "transparent",
-                               borderBottom: `1px solid ${theme.borderDim}`,
+                               borderBottom: `0.5px solid ${theme.borderSubtle}`,
                                color: hit ? theme.text : theme.textDim }}>
                       <td style={{ padding: "4px 8px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 140 }}>
                         <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: KIND_COLOR[k.kind], marginRight: 6 }}/>
@@ -837,7 +854,7 @@ export function Roofline() {
             </table>
           </div>
 
-          <div className="shrink-0 p-3" style={{ borderTop: `1px solid ${theme.border}`, fontSize: 10, color: theme.textMuted }}>
+          <div className="shrink-0 p-3" style={{ borderTop: `0.5px solid ${theme.borderSubtle}`, fontSize: 10, color: theme.textMuted }}>
             <div className="flex items-center gap-2 mb-1" style={{ color: theme.text }}>
               <Cpu size={11} style={{ color: theme.success }}/>
               <span>Compute-bound if AI &gt; {RIDGE_DDR.toFixed(0)}</span>

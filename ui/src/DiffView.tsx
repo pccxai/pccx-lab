@@ -29,7 +29,7 @@ export function DiffView({ original, modified, originalTitle, modifiedTitle, lan
         display: "flex",
         height: 28,
         alignItems: "center",
-        borderBottom: `1px solid ${theme.border}`,
+        borderBottom: `0.5px solid ${theme.borderSubtle}`,
         background: theme.bgPanel,
         fontSize: 11,
         flexShrink: 0,

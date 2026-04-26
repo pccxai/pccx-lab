@@ -114,7 +114,7 @@ export function ExtensionManager() {
                   return (
                     <div
                       key={ext.id}
-                      style={{ background: theme.bgSurface, border: `1px solid ${theme.border}`, borderRadius: 8, padding: 16 }}
+                      style={{ background: theme.bgSurface, border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 8, padding: 16 }}
                       className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between transition-colors"
                       onMouseEnter={e => e.currentTarget.style.borderColor = theme.borderDim}
                       onMouseLeave={e => e.currentTarget.style.borderColor = theme.border}

@@ -459,14 +459,11 @@ export function FlameGraph() {
     const targetOffset = bottleneck.start - (containerRef.current?.clientWidth || 800) * 0.1 * vp.current.cpp; // 10% from left
     const targetCpp = bottleneck.duration / ((containerRef.current?.clientWidth || 800) * 0.8); // Fit node into 80%
 
-    // Round-6 T-3: animate via requestAnimationFrame instead of a
-    // 16-ms interval — the browser throttles RAF to the actual vsync
-    // rate, no setTimeout drift, and the loop pauses when the tab is
-    // hidden (MDN Page Visibility API).
+    // Animate via the shared RAF scheduler — coalesces with other
+    // flamegraph draws and auto-disposes on unmount.
     let step = 0;
     const startOff = vp.current.offset;
     const startCpp = vp.current.cpp;
-    let rafId = 0;
     const tick = () => {
       step++;
       const t = step / 30; // 30-frame ease
@@ -476,7 +473,6 @@ export function FlameGraph() {
       scheduleDraw();
 
       if (step >= 30) {
-        cancelAnimationFrame(rafId);
         // Wire up to the detect_bottlenecks IPC (ship-ready in core crate).
         type BottleneckInterval = { kind: string; start_cycle: number; end_cycle: number; share: number; event_count: number };
         invoke<BottleneckInterval[]>("detect_bottlenecks", {
@@ -499,13 +495,13 @@ export function FlameGraph() {
           });
         });
       } else {
-        rafId = requestAnimationFrame(tick);
+        sched.schedule("flamegraph-anim", tick);
       }
     };
-    rafId = requestAnimationFrame(tick);
+    sched.schedule("flamegraph-anim", tick);
   };
 
-  const btnStyle = { fontSize: 10, padding: "2px 8px", borderRadius: 3, background: theme.bgSurface, color: theme.textDim, border: `1px solid ${theme.border}`, cursor: "pointer", transition: "all 0.2s" };
+  const btnStyle = { fontSize: 10, padding: "2px 8px", borderRadius: 3, background: theme.bgSurface, color: theme.textDim, border: `0.5px solid ${theme.borderSubtle}`, cursor: "pointer", transition: "all 0.2s" };
 
   // Span → structured description map. Looks up by span.name or prefix.
   function describeSpan(s: Span): { title: string; kind: string; what: string; where: string; cycles: string; tips: string[] } {
@@ -565,10 +561,10 @@ export function FlameGraph() {
 
   return (
     <div ref={rootRef} tabIndex={0} className="w-full h-full flex flex-col relative outline-none" style={{ background: theme.bgPanel }}>
-      <div className="flex items-center px-3 gap-3 shrink-0" style={{ height: 30, borderBottom: `1px solid ${theme.border}` }}>
+      <div className="flex items-center px-3 gap-3 shrink-0" style={{ height: 30, borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: theme.textMuted, letterSpacing: "0.05em" }}>FLAME GRAPH</span>
         {/* Round-6 T-1: cycle cursor readout + numeric go-to-cycle */}
-        <span style={{ fontSize: 9, color: theme.textMuted, fontFamily: "monospace" }}>
+        <span style={{ fontSize: 9, color: theme.textMuted, fontFamily: theme.fontMono }}>
           cyc {cursor.cycle.toLocaleString()} / {Math.max(totalCycles, cursor.totalCycles).toLocaleString()}
         </span>
         <label style={{ fontSize: 9, color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}
@@ -584,7 +580,7 @@ export function FlameGraph() {
             style={{
               width: 70, height: 18, fontSize: 9, padding: "0 4px",
               background: theme.bgSurface, color: theme.text,
-              border: `1px solid ${theme.border}`, borderRadius: 2, outline: "none",
+              border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 2, outline: "none",
             }}
           />
         </label>
@@ -599,14 +595,14 @@ export function FlameGraph() {
               borderRadius: 3,
               background: theme.error ? `${theme.error}22` : "#f5933320",
               color: theme.error ?? "#f59e0b",
-              border: `1px solid ${theme.error ?? "#f59e0b"}55`,
+              border: `0.5px solid ${theme.error ?? "#f59e0b"}55`,
             }}
             title="No .pccx trace is loaded — the panel below is an honest placeholder, not real data.">
             (synthetic)
           </span>
         )}
         <button aria-label="Fit flame graph to viewport" onClick={() => { if(containerRef.current) { vp.current.offset=0; vp.current.cpp = totalCycles / containerRef.current.clientWidth; scheduleDraw(); setAiAnalysis(null); } }} style={btnStyle} className="hover:opacity-80">Fit All</button>
-        <button aria-label="Find dominant bottleneck" onClick={handleAIHotspot} style={{ ...btnStyle, background: theme.accent, color: "#fff", border: `1px solid ${theme.accent}`, display: "flex", alignItems: "center", gap: 4 }} className="hover:opacity-80">
+        <button aria-label="Find dominant bottleneck" onClick={handleAIHotspot} style={{ ...btnStyle, background: theme.accent, color: "#fff", border: `0.5px solid ${theme.accent}`, display: "flex", alignItems: "center", gap: 4 }} className="hover:opacity-80">
            Find Bottleneck
         </button>
         <button aria-label="Load second run for comparison" onClick={loadRunB} style={btnStyle} className="hover:opacity-80" title="Open a second .pccx for per-span duration ratio overlay">Compare run…</button>
@@ -615,13 +611,13 @@ export function FlameGraph() {
             aria-label={`Toggle diff mode, currently ${diffMode ? "on" : "off"}`}
             aria-pressed={diffMode}
             onClick={() => setDiffMode(d => !d)}
-            style={{ ...btnStyle, background: diffMode ? theme.accentBg : "transparent", color: diffMode ? theme.accent : theme.textDim, border: `1px solid ${diffMode ? theme.accent : theme.border}` }}
+            style={{ ...btnStyle, background: diffMode ? theme.accentBg : "transparent", color: diffMode ? theme.accent : theme.textDim, border: `0.5px solid ${diffMode ? theme.accent : theme.borderSubtle}` }}
             title="Ctrl+Shift+D">
             Diff: {diffMode ? "ON" : "OFF"}
           </button>
         )}
         {compareLabel && (
-          <span style={{ fontSize: 9, color: theme.textDim, fontFamily: "monospace" }} title={compareLabel}>
+          <span style={{ fontSize: 9, color: theme.textDim, fontFamily: theme.fontMono }} title={compareLabel}>
             B: {compareLabel}
             <button aria-label="Clear compare trace" onClick={clearRunB} style={{ marginLeft: 6, color: theme.textMuted }}>×</button>
           </span>
@@ -705,14 +701,14 @@ export function FlameGraph() {
               no trace loaded · (synthetic)
             </div>
             <div style={{ fontSize: 10, color: theme.textFaint }}>
-              Open a <code style={{ fontFamily: "monospace" }}>.pccx</code> file to populate the flame graph.
+              Open a <code style={{ fontFamily: theme.fontMono }}>.pccx</code> file to populate the flame graph.
             </div>
           </div>
         )}
         {tooltip && (
           <div className="absolute z-50 pointer-events-none rounded px-2 py-1.5 shadow-xl transition-all" style={{
             left: tooltip.x, top: tooltip.y, fontSize: 10, whiteSpace: "pre",
-            background: theme.bgSurface, color: theme.text, border: `1px solid ${theme.border}`, boxShadow: "0 4px 12px rgba(0,0,0,0.3)"
+            background: theme.bgSurface, color: theme.text, border: `0.5px solid ${theme.borderSubtle}`, boxShadow: "0 4px 12px rgba(0,0,0,0.3)"
           }}>
             {tooltip.text}
           </div>
@@ -720,7 +716,7 @@ export function FlameGraph() {
 
         {/* AI Analysis Floating Widget */}
         {aiAnalysis && (
-            <div className="absolute top-6 left-1/2 transform -translate-x-1/2 w-[400px] rounded-lg p-4 shadow-2xl animate-in zoom-in slide-in-from-top-4 duration-300" style={{ background: theme.mode === "dark" ? "#252526" : "#fff", border: `1px solid ${theme.error}`, boxShadow: "0 10px 40px rgba(0,0,0,0.5)" }}>
+            <div className="absolute top-6 left-1/2 transform -translate-x-1/2 w-[400px] rounded-lg p-4 shadow-2xl animate-in zoom-in slide-in-from-top-4 duration-300" style={{ background: theme.mode === "dark" ? "#252526" : "#fff", border: `0.5px solid ${theme.error}`, boxShadow: "0 10px 40px rgba(0,0,0,0.5)" }}>
                <div className="flex items-center gap-2 mb-2">
                  <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: theme.error }}></div>
                  <h4 style={{ fontSize: 12, fontWeight: 700, color: theme.error }}>Critical Stalls Detected</h4>
@@ -740,14 +736,14 @@ export function FlameGraph() {
         return (
           <div className="shrink-0 flex flex-col" style={{
             minHeight: 160, maxHeight: 260,
-            borderTop: `1px solid ${theme.border}`,
+            borderTop: `0.5px solid ${theme.borderSubtle}`,
             background: theme.mode === "dark" ? "#1a1a1a" : "#fafafa",
           }}>
-            <div className="flex items-center gap-3 px-3" style={{ height: 28, borderBottom: `1px solid ${theme.border}`, background: theme.bgSurface }}>
+            <div className="flex items-center gap-3 px-3" style={{ height: 28, borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bgSurface }}>
               <div className="w-2 h-2 rounded-full" style={{ background: selected.color }} />
-              <span style={{ fontSize: 11, fontWeight: 700, color: theme.text, fontFamily: "monospace" }}>{info.title}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: theme.text, fontFamily: theme.fontMono }}>{info.title}</span>
               <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 3, background: theme.mode === "dark" ? "#2d2d2d" : "#e5e5e5", color: theme.textDim }}>{info.kind}</span>
-              <span style={{ fontSize: 10, color: theme.textDim, fontFamily: "monospace" }}>{info.cycles}</span>
+              <span style={{ fontSize: 10, color: theme.textDim, fontFamily: theme.fontMono }}>{info.cycles}</span>
               <div className="flex-1" />
               <button aria-label="Close span detail" onClick={() => setSelected(null)} style={{ fontSize: 10, color: theme.textMuted, padding: "2px 6px" }}>close</button>
             </div>
@@ -758,7 +754,7 @@ export function FlameGraph() {
               </div>
               <div>
                 <div style={{ fontSize: 9, color: theme.textMuted, marginBottom: 2, letterSpacing: "0.05em" }}>WHERE</div>
-                <div style={{ fontFamily: "monospace", fontSize: 11, color: theme.textDim }}>{info.where}</div>
+                <div style={{ fontFamily: theme.fontMono, fontSize: 11, color: theme.textDim }}>{info.where}</div>
               </div>
               {info.tips.length > 0 && (
                 <div>

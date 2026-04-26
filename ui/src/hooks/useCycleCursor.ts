@@ -113,6 +113,23 @@ function scheduleSnapshotFetch(cycle: number) {
       }
       snapshotCache.set(cycle, result);
       emitSnapshot(result, false);
+      // Prefetch adjacent cycles for smooth scrubbing
+      const PREFETCH_RADIUS = 4;
+      for (let d = -PREFETCH_RADIUS; d <= PREFETCH_RADIUS; d++) {
+        if (d === 0) continue;
+        const adj = cycle + d;
+        if (adj < 0 || adj > cursorState.totalCycles) continue;
+        if (snapshotCache.has(adj)) continue;
+        invoke<RegisterSnapshot>("step_to_cycle", { cycle: adj })
+          .then(r => {
+            if (snapshotCache.size >= MAX_SNAPSHOT_CACHE) {
+              const oldest = snapshotCache.keys().next().value;
+              if (oldest !== undefined) snapshotCache.delete(oldest);
+            }
+            snapshotCache.set(adj, r);
+          })
+          .catch(() => {});
+      }
     } catch (e) {
       if (gen !== ipcGeneration) return;
       console.error("[useCycleCursor] step_to_cycle IPC failed:", e);
@@ -138,13 +155,16 @@ function setCycleGlobal(next: number) {
   emit({ cycle: n, totalCycles: cursorState.totalCycles });
 }
 
+function clearSnapshotCache() {
+  snapshotCache.clear();
+  ipcGeneration++;
+}
+
 function setTotalCyclesGlobal(total: number) {
   const t = Math.max(1, Math.floor(total));
-  if (t === cursorState.totalCycles) return;
-  // New trace loaded — cached snapshots are invalid.
-  snapshotCache.clear();
-  // Keep the cursor in-bounds when the trace shrinks.
+  clearSnapshotCache();
   const nextCycle = Math.min(cursorState.cycle, t);
+  if (nextCycle === cursorState.cycle && t === cursorState.totalCycles) return;
   emit({ cycle: nextCycle, totalCycles: t });
 }
 

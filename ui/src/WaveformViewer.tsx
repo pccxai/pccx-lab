@@ -387,6 +387,9 @@ export function WaveformViewer() {
   const theme = useTheme();
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Cache last canvas dimensions to avoid GPU buffer reallocation on
+  // every repaint when the size hasn't actually changed.
+  const lastDimsRef  = useRef<{ w: number; h: number; dpr: number }>({ w: 0, h: 0, dpr: 0 });
 
   const [parsedDump, setParsedDump] = useState<WaveformDump | null>(null);
   const [sourceLabel, setSourceLabel] = useState<string>("(demo)");
@@ -547,12 +550,18 @@ export function WaveformViewer() {
     const dpr = window.devicePixelRatio || 1;
     const cw = cont.clientWidth, ch = cont.clientHeight;
     if (cw <= 0 || ch <= 0) return;
-    canvas.width  = cw * dpr;
-    canvas.height = ch * dpr;
-    canvas.style.width  = `${cw}px`;
-    canvas.style.height = `${ch}px`;
+    // Only reallocate the GPU backing buffer when the viewport actually
+    // changes size — avoids an expensive alloc+clear on every repaint.
+    const ld = lastDimsRef.current;
+    if (ld.w !== cw || ld.h !== ch || ld.dpr !== dpr) {
+      canvas.width  = cw * dpr;
+      canvas.height = ch * dpr;
+      canvas.style.width  = `${cw}px`;
+      canvas.style.height = `${ch}px`;
+      lastDimsRef.current = { w: cw, h: ch, dpr };
+    }
     const ctx = canvas.getContext("2d")!;
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cw, ch);
 
     // Background split
@@ -688,7 +697,7 @@ export function WaveformViewer() {
     };
     drawCursor(cursorA, "A", theme.warning);
     drawCursor(cursorB, "B", theme.info);
-  }, [rows, zoom, offset, cursorA, cursorB, selectedSig, theme, totalTicks, bookmarks]);
+  }, [rows, zoom, offset, cursorA, cursorB, selectedSig, theme, bookmarks]);
 
   // Round-6 T-3 — RAF-coalesced draw scheduler.
   const sched = useRafScheduler();
@@ -696,10 +705,10 @@ export function WaveformViewer() {
     sched.schedule("waveform", draw);
   }, [sched, draw]);
 
-  // Initial + dep-change paint stays synchronous so the first frame is
-  // immediate; every subsequent ResizeObserver / cursor-driven repaint
-  // coalesces via the scheduler.
-  useEffect(() => { draw(); }, [draw]);
+  // All repaints (initial, dep-change, resize) funnel through the RAF
+  // scheduler. Coalesces rapid state updates (drag, wheel) into one
+  // draw per vsync instead of one per setState.
+  useEffect(() => { scheduleDraw(); }, [scheduleDraw]);
   useEffect(() => {
     const ro = new ResizeObserver(() => scheduleDraw());
     if (containerRef.current) ro.observe(containerRef.current);
@@ -724,7 +733,11 @@ export function WaveformViewer() {
     if (dA < 8)        setDragState({ kind: "cursorA",  startX: e.clientX, startOffset: cursorA ?? 0 });
     else if (dB < 8)   setDragState({ kind: "cursorB",  startX: e.clientX, startOffset: cursorB ?? 0 });
     else if (e.shiftKey) setCursorB(Math.max(0, Math.round(t)));
-    else if (e.altKey)   setCursorA(Math.max(0, Math.round(t)));
+    else if (e.altKey) {
+      const snapped = Math.max(0, Math.round(t));
+      setCursorA(snapped);
+      cursor.setCycle(snapped);
+    }
     else                 setDragState({ kind: "pan", startX: e.clientX, startOffset: offset });
   };
 
@@ -734,9 +747,13 @@ export function WaveformViewer() {
     if (dragState.kind === "pan") {
       setOffset(Math.max(0, dragState.startOffset - dx / zoom));
     } else {
-      const newT = Math.max(0, dragState.startOffset + dx / zoom);
-      if (dragState.kind === "cursorA") setCursorA(Math.round(newT));
-      else                               setCursorB(Math.round(newT));
+      const newT = Math.round(Math.max(0, dragState.startOffset + dx / zoom));
+      if (dragState.kind === "cursorA") {
+        setCursorA(newT);
+        cursor.setCycle(newT);
+      } else {
+        setCursorB(newT);
+      }
     }
   };
 
@@ -846,6 +863,7 @@ export function WaveformViewer() {
       const ref = cursorA ?? 0;
       const next = sorted.find(b => b.tick > ref) ?? sorted[0];
       setCursorA(next.tick);
+      cursor.setCycle(next.tick);
       // Re-centre the viewport if the jump lands off-screen.
       if (containerRef.current) {
         const cw = containerRef.current.clientWidth;
@@ -856,7 +874,7 @@ export function WaveformViewer() {
       }
       return prev;
     });
-  }, [cursorA, offset, zoom]);
+  }, [cursorA, offset, zoom, cursor]);
 
   // Global Ctrl+B hotkey — jump to next bookmark. (The waveform panel
   // doesn't always hold focus, so we attach to window.)
@@ -876,25 +894,18 @@ export function WaveformViewer() {
     return () => window.removeEventListener("keydown", onKey);
   }, [jumpNextBookmark]);
 
-  // ─── Round-6 T-1: cycle-granular keyboard control ────────────────────────
   // Pre-sorted edge (transition) index for the focused signal.  Used
   // by `stepEdge` to snap the cursor to the next / previous posedge
   // (Surfer 0.2.0 + GTKWave 3.3 convention).  Binary-searched at O(log N).
-  const selectedSignalForEdges = useMemo(() => {
-    if (!selectedSig) return null;
-    for (const g of groups) for (const s of g.children) if (s.id === selectedSig) return s;
-    return null;
-  }, [groups, selectedSig]);
-
   const focusedEdges = useMemo<number[]>(() => {
-    const s = selectedSignalForEdges;
+    const s = selectedSignal;
     if (!s || s.events.length === 0) return [];
     // Sort defensively — demo path already sorts, but a real VCD may
     // carry out-of-order glitches that break stepEdge's binary search.
     const ticks = s.events.map(e => e.t).slice().sort((a, b) => a - b);
     // De-dupe so stepEdge never gets trapped on a same-cycle zero-width pulse.
     return ticks.filter((t, i) => i === 0 || t !== ticks[i - 1]);
-  }, [selectedSignalForEdges]);
+  }, [selectedSignal]);
 
   // Keep cursor A in lock-step with the shared cursor when the user
   // moved it from another panel.  Comparing against `cursorA ?? -1`
@@ -960,7 +971,7 @@ export function WaveformViewer() {
     <main role="main" aria-label="Waveform viewer" className="w-full h-full flex flex-col" style={{ background: theme.bgPanel }}>
       {/* Top toolbar */}
       <div role="toolbar" aria-label="Waveform toolbar" className="flex items-center px-3 shrink-0 gap-2"
-           style={{ height: 44, borderBottom: `1px solid ${theme.border}`, background: theme.bgEditor }}>
+           style={{ height: 44, borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bgEditor }}>
         <Activity size={15} style={{ color: theme.accent }} />
         <span style={{ fontSize: 13, fontWeight: 700, color: theme.text }}>Waveform Analyser</span>
         <span style={{ fontSize: 10, color: theme.textMuted }}>
@@ -976,7 +987,7 @@ export function WaveformViewer() {
         {/* Signal filter */}
         <div style={{
           display: "flex", alignItems: "center", gap: 4, padding: "3px 8px",
-          background: theme.bgSurface, border: `1px solid ${theme.border}`, borderRadius: 4,
+          background: theme.bgSurface, border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 4,
         }}>
           <Search size={11} style={{ color: theme.textMuted }} />
           <input
@@ -996,7 +1007,7 @@ export function WaveformViewer() {
         </div>
 
         {/* Global radix */}
-        <div style={{ display: "inline-flex", gap: 2, background: theme.bgSurface, border: `1px solid ${theme.border}`, borderRadius: 4, padding: 2 }}>
+        <div style={{ display: "inline-flex", gap: 2, background: theme.bgSurface, border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 4, padding: 2 }}>
           {(["bin", "oct", "hex", "dec", "ascii"] as Radix[]).map(r => (
             <button
               key={r}
@@ -1031,7 +1042,7 @@ export function WaveformViewer() {
 
       {/* Cursor readout + bookmark bar */}
       <div className="flex items-center px-3 shrink-0 gap-4"
-           style={{ height: 26, borderBottom: `1px solid ${theme.border}`, background: theme.bgSurface, fontSize: 10 }}>
+           style={{ height: 26, borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bgSurface, fontSize: 10 }}>
         <div style={{ color: theme.textMuted }}>
           <Crosshair size={10} style={{ marginRight: 4, verticalAlign: "middle" }} />
           drag=pan · <strong>Alt</strong>-click=A · <strong>Shift</strong>-click=B · right-click=bookmark · Ctrl+B=next bookmark · <strong>ArrowLeft/Right</strong>=prev/next edge · <strong>Shift+Arrow</strong>=±1 cyc · <strong>Ctrl+G</strong>=go to
@@ -1051,7 +1062,7 @@ export function WaveformViewer() {
             style={{
               width: 74, height: 18, fontSize: 10, padding: "0 4px",
               background: theme.bgEditor, color: theme.text,
-              border: `1px solid ${theme.border}`, borderRadius: 2, outline: "none",
+              border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 2, outline: "none",
             }}
           />
         </label>
@@ -1067,7 +1078,7 @@ export function WaveformViewer() {
       {/* Bookmark strip */}
       {bookmarks.length > 0 && (
         <div className="flex items-center px-3 shrink-0 gap-2 overflow-x-auto"
-             style={{ height: 24, borderBottom: `1px solid ${theme.borderDim}`, background: theme.bg, fontSize: 10 }}>
+             style={{ height: 24, borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bg, fontSize: 10 }}>
           <Bookmark size={11} style={{ color: theme.success, flexShrink: 0 }} />
           <span style={{ color: theme.textMuted, flexShrink: 0 }}>
             bookmarks ({bookmarks.length}/{MAX_BOOKMARKS}):
@@ -1075,13 +1086,13 @@ export function WaveformViewer() {
           {bookmarks.map(b => (
             <button
               key={b.tick}
-              onClick={() => { setCursorA(b.tick); setOffset(Math.max(0, b.tick - 40)); }}
+              onClick={() => { setCursorA(b.tick); cursor.setCycle(b.tick); setOffset(Math.max(0, b.tick - 40)); }}
               title={`jump cursor A to tick ${b.tick}. right-click to remove.`}
               onContextMenu={e => { e.preventDefault(); removeBookmark(b.tick); }}
               style={{
                 padding: "1px 7px", borderRadius: 3,
                 background: theme.bgSurface, color: theme.success,
-                border: `1px solid ${theme.borderDim}`, cursor: "pointer",
+                border: `0.5px solid ${theme.borderSubtle}`, cursor: "pointer",
                 fontFamily: "ui-monospace, monospace", fontWeight: 600,
                 flexShrink: 0,
               }}
@@ -1096,7 +1107,7 @@ export function WaveformViewer() {
       {loadError && (
         <div style={{
           padding: "4px 12px", background: theme.bgSurface,
-          borderBottom: `1px solid ${theme.border}`, color: theme.error, fontSize: 11,
+          borderBottom: `0.5px solid ${theme.borderSubtle}`, color: theme.error, fontSize: 11,
         }}>
           Failed to load VCD: {loadError}
         </div>
@@ -1105,7 +1116,7 @@ export function WaveformViewer() {
       {/* Per-signal radix strip (appears when a bus is selected) */}
       {selectedSignal && selectedSignal.width > 1 && (
         <div className="flex items-center px-3 shrink-0 gap-2"
-             style={{ height: 26, borderBottom: `1px solid ${theme.borderDim}`, background: theme.bg, fontSize: 10 }}>
+             style={{ height: 26, borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bg, fontSize: 10 }}>
           <Filter size={10} style={{ color: theme.textMuted }} />
           <span style={{ color: theme.textMuted }}>
             Selected: <strong style={{ color: theme.accent }}>{selectedSignal.scope}.{selectedSignal.name}</strong>
@@ -1120,7 +1131,7 @@ export function WaveformViewer() {
                 fontSize: 10, padding: "1px 6px", borderRadius: 3,
                 background: selectedSignal.radix === r ? theme.accentBg : "transparent",
                 color: selectedSignal.radix === r ? theme.accent : theme.textMuted,
-                border: `1px solid ${selectedSignal.radix === r ? theme.accent : theme.border}`,
+                border: `0.5px solid ${selectedSignal.radix === r ? theme.accent : theme.borderSubtle}`,
                 cursor: "pointer",
               }}
             >{r.toUpperCase()}</button>
@@ -1130,7 +1141,7 @@ export function WaveformViewer() {
             style={{
               fontSize: 10, padding: "1px 8px", borderRadius: 3,
               background: "transparent", color: theme.textMuted,
-              border: `1px solid ${theme.border}`, cursor: "pointer",
+              border: `0.5px solid ${theme.borderSubtle}`, cursor: "pointer",
             }}
             title="Cycle through radixes"
           >cycle →</button>
@@ -1178,7 +1189,7 @@ function drawWire(
   if (s.events.length === 0) return;
   const lo = yTop + h * 0.78;
   const hi = yTop + h * 0.22;
-  ctx.strokeStyle = s.name === "clk" ? theme.accent : "#22c55e";
+  ctx.strokeStyle = s.name === "clk" ? theme.accent : theme.success;
   ctx.lineWidth = 1.4;
   ctx.beginPath();
 
@@ -1249,14 +1260,14 @@ function drawBus(
       continue;
     }
     if (cur.v === "X" || cur.v === "x") {
-      ctx.fillStyle = "rgba(239,68,68,0.22)";
+      ctx.fillStyle = theme.errorBg;
       ctx.fillRect(drawX, hi, drawW, lo - hi);
       continue;
     }
 
     // Hexagon outline
     ctx.fillStyle = theme.bgHover;
-    ctx.strokeStyle = "#38bdf8";
+    ctx.strokeStyle = theme.info;
     ctx.lineWidth = 1;
     const slant = Math.min(4, drawW / 2);
     ctx.beginPath();
@@ -1317,7 +1328,7 @@ function iconBtn(theme: ReturnType<typeof useTheme>) {
     display: "inline-flex" as const, alignItems: "center" as const, gap: 4,
     fontSize: 10, padding: "4px 8px",
     color: theme.textMuted, background: theme.bgSurface,
-    border: `1px solid ${theme.border}`, borderRadius: 4,
+    border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 4,
     cursor: "pointer" as const,
   };
 }

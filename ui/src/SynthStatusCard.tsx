@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState, useCallback, useMemo, memo } from "react";
 import { useTheme } from "./ThemeContext";
 import { Cpu, Timer, CheckCircle2, AlertTriangle } from "lucide-react";
 
@@ -25,8 +24,7 @@ export interface SynthReport {
   device: string;
 }
 
-/** Mirrors `pccx_core::vivado_timing::TimingReport` across the Tauri bridge.
- *  UG906 design-timing-summary + UG949 per-clock breakdown. */
+/** Mirrors `pccx_core::vivado_timing::TimingReport` across the Tauri bridge. */
 export interface TimingReport {
   wns_ns:             number;
   tns_ns:             number;
@@ -67,27 +65,31 @@ function tauriInvoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> 
   return bridge(cmd, args);
 }
 
-function Stat({ label, value, theme }: { label: string; value: number | string; theme: ReturnType<typeof useTheme> }) {
+// Memoized stat cell to avoid re-renders when sibling cells change
+const Stat = memo(function Stat(
+  { label, value, style }: { label: string; value: string; style: React.CSSProperties },
+) {
+  const theme = useTheme();
   return (
     <div
-      className="flex flex-col items-center justify-center px-3 py-2 rounded"
-      style={{ background: theme.bg, border: `1px solid ${theme.border}` }}
+      className="flex flex-col items-center justify-center px-3 py-2"
+      style={style}
     >
       <span style={{ fontSize: 10, color: theme.textMuted, letterSpacing: 0.5 }}>{label}</span>
       <span style={{ fontSize: 15, fontWeight: 700, color: theme.text, marginTop: 2 }}>{value}</span>
     </div>
   );
-}
+});
 
-export function SynthStatusCard({ utilizationPath, timingPath, autoLoad = true }: Props) {
+export const SynthStatusCard = memo(function SynthStatusCard(
+  { utilizationPath, timingPath, autoLoad = true }: Props,
+) {
   const theme = useTheme();
   const [status, setStatus] = useState<Status>({ kind: "idle" });
-  // Dim-6 signoff panel: `load_timing_report` yields `TimingReport`
-  // in the same card.  Shared `err` collapses both IPC error branches.
   const [timing, setTiming] = useState<TimingReport | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setStatus({ kind: "loading" });
     setErr(null);
     try {
@@ -100,22 +102,18 @@ export function SynthStatusCard({ utilizationPath, timingPath, autoLoad = true }
       setStatus({ kind: "error", message: String(e) });
       setErr(String(e));
     }
-  };
+  }, [utilizationPath, timingPath]);
 
   useEffect(() => {
-    if (autoLoad) {
-      void load();
-    }
-  }, [utilizationPath, timingPath, autoLoad]);
+    if (autoLoad) void load();
+  }, [load, autoLoad]);
 
-  // UG906 structured timing: parses `report_timing_summary` text via
-  // `pccx_core::vivado_timing::parse_timing_report` on the Rust side.
   useEffect(() => {
     if (!autoLoad || !timingPath) return;
     let cancelled = false;
     (async () => {
       try {
-        const t = await invoke<TimingReport>("load_timing_report", {
+        const t = await tauriInvoke<TimingReport>("load_timing_report", {
           path: timingPath,
         });
         if (!cancelled) setTiming(t);
@@ -129,11 +127,66 @@ export function SynthStatusCard({ utilizationPath, timingPath, autoLoad = true }
     return () => { cancelled = true; };
   }, [timingPath, autoLoad]);
 
+  // -- Memoized styles --
+
+  const cardStyle = useMemo(() => ({
+    background: theme.bgSurface,
+    border: `0.5px solid ${theme.borderSubtle}`,
+    borderRadius: theme.radiusMd,
+    boxShadow: theme.shadowSm,
+    minWidth: 320,
+    transition: `box-shadow 0.2s ${theme.ease}`,
+  }), [theme.bgSurface, theme.borderSubtle, theme.radiusMd, theme.shadowSm, theme.ease]);
+
+  const buttonStyle = useMemo(() => ({
+    background: theme.accentBg,
+    color: theme.accent,
+    border: `0.5px solid ${theme.borderSubtle}`,
+    borderRadius: theme.radiusSm,
+    cursor: status.kind === "loading" ? "wait" as const : "pointer" as const,
+    transition: `background 0.15s ${theme.ease}`,
+  }), [theme.accentBg, theme.accent, theme.borderSubtle, theme.radiusSm, theme.ease, status.kind]);
+
+  const statCellStyle = useMemo(() => ({
+    background: theme.bg,
+    border: `0.5px solid ${theme.borderSubtle}`,
+    borderRadius: theme.radiusSm,
+  }), [theme.bg, theme.borderSubtle, theme.radiusSm]);
+
+  // Formatted utilization stats
+  const statEntries = useMemo(() => {
+    if (status.kind !== "ok") return [];
+    const u = status.report.utilisation;
+    const t = status.report.timing;
+    return [
+      { label: "LUT",       value: u.total_luts.toLocaleString() },
+      { label: "FF",        value: u.ffs.toLocaleString() },
+      { label: "RAMB36",    value: u.rams_36.toLocaleString() },
+      { label: "RAMB18",    value: u.rams_18.toLocaleString() },
+      { label: "URAM",      value: u.urams.toLocaleString() },
+      { label: "DSP",       value: u.dsps.toLocaleString() },
+      { label: "Logic",     value: u.logic_luts.toLocaleString() },
+      { label: "Endpoints", value: t.total_endpoints.toLocaleString() },
+    ];
+  }, [status]);
+
+  const timingBannerStyle = useMemo(() => {
+    if (status.kind !== "ok") return {};
+    const met = status.report.timing.is_timing_met;
+    return {
+      background: met ? theme.successBg : theme.errorBg,
+      border: `0.5px solid ${met ? theme.success : theme.error}`,
+      borderRadius: theme.radiusSm,
+    };
+  }, [status, theme.successBg, theme.errorBg, theme.success, theme.error, theme.radiusSm]);
+
+  // Per-clock-domain structured timing section
+  const timingSectionStyle = useMemo(() => ({
+    borderTop: `0.5px solid ${theme.borderSubtle}`,
+  }), [theme.borderSubtle]);
+
   return (
-    <div
-      className="flex flex-col gap-3 p-4 rounded-md"
-      style={{ background: theme.bgSurface, border: `1px solid ${theme.border}`, minWidth: 320 }}
-    >
+    <div className="flex flex-col gap-3 p-4" style={cardStyle}>
       <div className="flex items-center gap-2">
         <Cpu size={16} style={{ color: theme.accent }} />
         <span style={{ fontWeight: 600, fontSize: 13 }}>Synthesis Status</span>
@@ -141,13 +194,8 @@ export function SynthStatusCard({ utilizationPath, timingPath, autoLoad = true }
           <button
             onClick={load}
             disabled={status.kind === "loading"}
-            className="px-2 py-0.5 text-[11px] rounded"
-            style={{
-              background: theme.accentBg,
-              color: theme.accent,
-              border: `1px solid ${theme.border}`,
-              cursor: status.kind === "loading" ? "wait" : "pointer",
-            }}
+            className="px-2 py-0.5 text-[11px]"
+            style={buttonStyle}
           >
             {status.kind === "loading" ? "Loading…" : "Reload"}
           </button>
@@ -178,25 +226,12 @@ export function SynthStatusCard({ utilizationPath, timingPath, autoLoad = true }
           </div>
 
           <div className="grid grid-cols-4 gap-2">
-            <Stat label="LUT"     value={status.report.utilisation.total_luts} theme={theme} />
-            <Stat label="FF"      value={status.report.utilisation.ffs}        theme={theme} />
-            <Stat label="RAMB36"  value={status.report.utilisation.rams_36}    theme={theme} />
-            <Stat label="RAMB18"  value={status.report.utilisation.rams_18}    theme={theme} />
-            <Stat label="URAM"    value={status.report.utilisation.urams}      theme={theme} />
-            <Stat label="DSP"     value={status.report.utilisation.dsps}       theme={theme} />
-            <Stat label="Logic"   value={status.report.utilisation.logic_luts} theme={theme} />
-            <Stat label="Endpoints" value={status.report.timing.total_endpoints} theme={theme} />
+            {statEntries.map(s => (
+              <Stat key={s.label} label={s.label} value={s.value} style={statCellStyle} />
+            ))}
           </div>
 
-          <div
-            className="flex items-center gap-2 px-3 py-2 rounded"
-            style={{
-              background: status.report.timing.is_timing_met
-                ? "rgba(78,200,107,0.10)"
-                : "rgba(241,76,76,0.12)",
-              border: `1px solid ${status.report.timing.is_timing_met ? theme.success : theme.error}`,
-            }}
-          >
+          <div className="flex items-center gap-2 px-3 py-2" style={timingBannerStyle}>
             {status.report.timing.is_timing_met ? (
               <CheckCircle2 size={16} style={{ color: theme.success }} />
             ) : (
@@ -210,20 +245,14 @@ export function SynthStatusCard({ utilizationPath, timingPath, autoLoad = true }
               WNS {status.report.timing.wns_ns.toFixed(3)} ns
               {status.report.timing.worst_clock && ` on ${status.report.timing.worst_clock}`}
               {!status.report.timing.is_timing_met &&
-                ` · ${status.report.timing.failing_endpoints} failing`}
+                ` · ${status.report.timing.failing_endpoints.toLocaleString()} failing`}
             </span>
           </div>
         </>
       )}
 
-      {/* UG949 §4 timing-summary grouping — structured TimingReport from
-          `load_timing_report` (Dim-6 signoff).  Negative WNS/TNS renders
-          in theme.error per PrimeTime convention. */}
       {timing && (
-        <div
-          className="flex flex-col gap-2 pt-2"
-          style={{ borderTop: `1px solid ${theme.border}` }}
-        >
+        <div className="flex flex-col gap-2 pt-2" style={timingSectionStyle}>
           <div className="flex items-center gap-2" style={{ fontSize: 11, color: theme.textMuted }}>
             <Timer size={12} style={{ color: theme.accent }} />
             <strong style={{ color: theme.text, fontSize: 12 }}>Timing Report</strong>
@@ -237,7 +266,7 @@ export function SynthStatusCard({ utilizationPath, timingPath, autoLoad = true }
               </span>
               <span style={{ margin: "0 6px", color: theme.textFaint }}>·</span>
               <span style={{ color: timing.failing_endpoints > 0 ? theme.error : theme.textMuted }}>
-                {timing.failing_endpoints} failing
+                {timing.failing_endpoints.toLocaleString()} failing
               </span>
             </span>
           </div>
@@ -253,7 +282,7 @@ export function SynthStatusCard({ utilizationPath, timingPath, autoLoad = true }
               </thead>
               <tbody>
                 {timing.clock_domains.map(c => (
-                  <tr key={c.name} style={{ borderTop: `1px solid ${theme.borderDim}` }}>
+                  <tr key={c.name} style={{ borderTop: `0.5px solid ${theme.borderSubtle}` }}>
                     <td style={{ padding: "2px 6px", color: theme.text }}>{c.name}</td>
                     <td style={{ padding: "2px 6px", textAlign: "right", color: theme.textDim }}>
                       {c.period_ns.toFixed(3)} ns
@@ -275,4 +304,4 @@ export function SynthStatusCard({ utilizationPath, timingPath, autoLoad = true }
       )}
     </div>
   );
-}
+});

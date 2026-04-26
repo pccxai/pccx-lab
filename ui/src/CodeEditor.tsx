@@ -1,11 +1,11 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import Editor from "@monaco-editor/react";
 import { invoke } from "@tauri-apps/api/core";
 import { Play, Sparkles, TerminalSquare, X, Activity } from "lucide-react";
 import { useTheme } from "./ThemeContext";
 import { monarchSv, systemverilogLanguageConfig } from "./monarch_sv";
 import { monarchCx, cxLanguageConfig } from "./monarch_cx";
-import { ensureMonacoReady } from "./monacoSetup";
+import { ensureMonacoReady, registerLspProviders, updateDiagnostics } from "./monacoSetup";
 
 // ─── Templates ────────────────────────────────────────────────────────────────
 
@@ -225,8 +225,25 @@ export function CodeEditor() {
   const [simLogs, setSimLogs] = useState<string[]>([]);
   const [isSimulating, setIsSimulating] = useState(false);
 
+  const activeFileRef = useRef(activeFile);
+  activeFileRef.current = activeFile;
+
+  const editorRef = useRef<any>(null);
+  const monacoRef = useRef<any>(null);
+  const diagTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     ensureMonacoReady().then(() => setMonacoReady(true));
+  }, []);
+
+  // Register LSP providers once Monaco instance is available.
+  const handleEditorDidMount = useCallback((editor: any, monaco: any) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+    registerLspProviders(monaco);
+    // Run initial diagnostics on the loaded model.
+    const model = editor.getModel();
+    if (model) updateDiagnostics(monaco, model);
   }, []);
 
   const openFileFromPath = useCallback(async (path: string, name: string) => {
@@ -281,16 +298,31 @@ export function CodeEditor() {
   const currentOpenFile = isFileTab ? openFiles.find(f => `file:${f.path}` === activeFile) : null;
   const isDirty = currentOpenFile ? files[activeFile] !== currentOpenFile.savedContent : false;
 
+  // Debounced diagnostics: re-run 500 ms after the last edit.
+  useEffect(() => {
+    if (!monacoRef.current || !editorRef.current) return;
+    if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+    diagTimerRef.current = setTimeout(() => {
+      const model = editorRef.current?.getModel();
+      if (model && monacoRef.current) {
+        updateDiagnostics(monacoRef.current, model);
+      }
+    }, 500);
+    return () => {
+      if (diagTimerRef.current) clearTimeout(diagTimerRef.current);
+    };
+  }, [currentCode]);
+
   const isDark = theme.mode === "dark";
   const bg      = theme.bgEditor;
   const bgAlt   = theme.bgPanel;
-  const border  = theme.border;
   const lineCol = theme.textFaint;
   const kwColor = isDark ? "#c586c0" : "#7c3aed";
 
   const handleChange = useCallback((val: string | undefined) => {
-    setFiles(f => ({ ...f, [activeFile]: val ?? "" }));
-  }, [activeFile]);
+    const key = activeFileRef.current;
+    setFiles(f => ({ ...f, [key]: val ?? "" }));
+  }, []);
 
   // Register the Monarch SV grammar against the Monaco instance.
   // `beforeMount` fires before the model is constructed, so the language
@@ -345,7 +377,19 @@ export function CodeEditor() {
     setIsSimulating(false);
   };
 
-  const lineCount = currentCode.split("\n").length;
+  const lineCount = useMemo(() => currentCode.split("\n").length, [currentCode]);
+
+  const editorOptions = useMemo(() => ({
+    fontFamily: "JetBrains Mono, Menlo, monospace",
+    fontSize: 12,
+    lineNumbers: "on" as const,
+    minimap: { enabled: true },
+    scrollBeyondLastLine: false,
+    automaticLayout: true,
+    renderWhitespace: "selection" as const,
+    tabSize: 2,
+    wordWrap: "off" as const,
+  }), []);
 
   if (!monacoReady) {
     return (
@@ -358,7 +402,7 @@ export function CodeEditor() {
   return (
     <div className="w-full h-full flex flex-col relative" style={{ background: bg }}>
       {/* ─── Toolbar ─── */}
-      <div className="flex items-center overflow-x-auto shrink-0" style={{ height: 35, borderBottom: `1px solid ${border}`, background: bgAlt }}>
+      <div className="flex items-center overflow-x-auto shrink-0" style={{ height: 35, borderBottom: `0.5px solid ${theme.borderSubtle}`, background: bgAlt }}>
         {Object.entries(TEMPLATES).map(([key, { label }]) => (
           <button
             key={key}
@@ -398,10 +442,10 @@ export function CodeEditor() {
         <div className="flex-1" />
 
         <div className="flex gap-2 pr-3">
-          <button onClick={() => setAiBoxOpen(true)} className="flex items-center gap-1.5 px-3 py-1 rounded transition-all" style={{ fontSize: 11, background: isDark ? "#2a2a2a" : "#ede9fe", color: kwColor, border: `1px solid ${isDark ? "#444" : "#c4b5fd"}`, fontWeight: 600 }}>
+          <button onClick={() => setAiBoxOpen(true)} className="flex items-center gap-1.5 px-3 py-1 rounded transition-all" style={{ fontSize: 11, background: theme.bgSurface, color: kwColor, border: `0.5px solid ${theme.borderSubtle}`, fontWeight: 600 }}>
             <Sparkles size={12} /> Ask AI
           </button>
-          <button onClick={runSimulation} className="flex items-center gap-1.5 px-3 py-1 rounded transition-all hover:opacity-80" style={{ fontSize: 11, background: theme.success, color: "#fff", border: `1px solid ${theme.success}`, fontWeight: 600 }}>
+          <button onClick={runSimulation} className="flex items-center gap-1.5 px-3 py-1 rounded transition-all hover:opacity-80" style={{ fontSize: 11, background: theme.success, color: "#fff", border: `0.5px solid ${theme.success}`, fontWeight: 600 }}>
             <Play size={12} fill="currentColor" /> Run SV Test
           </button>
         </div>
@@ -409,8 +453,8 @@ export function CodeEditor() {
 
       {/* ─── AI Copilot Floating Prompt ─── */}
       {aiBoxOpen && (
-        <div className="absolute z-50 left-1/2 top-10 transform -translate-x-1/2 w-[400px] shadow-2xl rounded-lg overflow-hidden flex flex-col" style={{ background: theme.bgSurface, border: `1px solid ${theme.border}`, boxShadow: "0 10px 40px rgba(0,0,0,0.5)" }}>
-           <div className="flex items-center px-3 py-2 bg-gradient-to-r from-purple-500/20 to-blue-500/20" style={{ borderBottom: `1px solid ${theme.border}` }}>
+        <div className="absolute z-50 left-1/2 top-10 transform -translate-x-1/2 w-[400px] shadow-2xl rounded-lg overflow-hidden flex flex-col" style={{ background: theme.bgSurface, border: `0.5px solid ${theme.borderSubtle}`, boxShadow: "0 10px 40px rgba(0,0,0,0.5)" }}>
+           <div className="flex items-center px-3 py-2 bg-gradient-to-r from-purple-500/20 to-blue-500/20" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
              <Sparkles size={14} color={kwColor} className="mr-2" />
              <span style={{ fontSize: 12, fontWeight: 600, color: theme.text }}>AI Inline Generation</span>
              <div className="flex-1" />
@@ -434,23 +478,14 @@ export function CodeEditor() {
           value={currentCode}
           onChange={handleChange}
           beforeMount={handleBeforeMount}
-          options={{
-            fontFamily: "JetBrains Mono, Menlo, monospace",
-            fontSize: 12,
-            lineNumbers: "on",
-            minimap: { enabled: true },
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            renderWhitespace: "selection",
-            tabSize: 2,
-            wordWrap: "off",
-          }}
+          onMount={handleEditorDidMount}
+          options={editorOptions}
         />
       </div>
 
       {/* ─── Vivado / Simulation Terminal Drawer ─── */}
       {simDrawerOpen && (
-        <div className="h-48 shrink-0 flex flex-col relative z-20" style={{ background: "#111111", borderTop: `1px solid ${theme.border}` }}>
+        <div className="h-48 shrink-0 flex flex-col relative z-20" style={{ background: "#111111", borderTop: `0.5px solid ${theme.borderSubtle}` }}>
           <div className="flex items-center px-3 py-1.5 shrink-0" style={{ background: "#1a1a1a", borderBottom: "1px solid #333 text-xs" }}>
             <TerminalSquare size={13} color={theme.success} className="mr-2" />
             <span style={{ fontSize: 11, color: "#e5e5e5", fontWeight: 600 }}>Vivado XSIM Console</span>
@@ -472,7 +507,7 @@ export function CodeEditor() {
       )}
 
       {/* ─── Footer Status ─── */}
-      <div className="flex items-center px-3 shrink-0" style={{ height: 22, borderTop: `1px solid ${border}`, background: bgAlt }}>
+      <div className="flex items-center px-3 shrink-0" style={{ height: 22, borderTop: `0.5px solid ${theme.borderSubtle}`, background: bgAlt }}>
         <span style={{ fontSize: 9, color: lineCol }}>
           {isDirty && <span style={{ color: theme.warning }}>● </span>}
           {currentOpenFile ? currentOpenFile.name : (TEMPLATES[activeFile]?.label ?? activeFile)} — {lineCount} lines — SystemVerilog

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useCallback, useEffect, useMemo, useState, ReactNode } from "react";
 
 // ─── Supported languages ─────────────────────────────────────────────────────
 
@@ -47,6 +47,34 @@ const STRINGS: Record<string, Record<Lang, string>> = {
   "status.noTrace":       { en: "No Trace",          ko: "트레이스 없음" },
   "status.cycles":        { en: "Cycles",            ko: "사이클" },
   "status.cores":         { en: "Cores",             ko: "코어" },
+  "status.version":       { en: "pccx-lab v0.4.0",   ko: "pccx-lab v0.4.0" },
+  "status.dark":          { en: "Dark",              ko: "다크" },
+  "status.light":         { en: "Light",             ko: "라이트" },
+  "status.toggleTheme":   { en: "Toggle theme",      ko: "테마 전환" },
+  "status.fps":           { en: "FPS",               ko: "FPS" },
+
+  // TitleBar
+  "title.start":          { en: "Start",             ko: "시작" },
+  "title.pause":          { en: "Pause",             ko: "일시정지" },
+  "title.stop":           { en: "Stop",              ko: "정지" },
+  "title.step":           { en: "Step",              ko: "스텝" },
+  "title.toggleTheme":    { en: "Toggle theme",      ko: "테마 전환" },
+  "title.minimize":       { en: "Minimize",          ko: "최소화" },
+  "title.maximize":       { en: "Maximize",          ko: "최대화" },
+  "title.close":          { en: "Close",             ko: "닫기" },
+  "title.simTarget":      { en: "NPU SIM",           ko: "NPU SIM" },
+
+  // MainToolbar — run controls
+  "toolbar.start":        { en: "Start Simulation",  ko: "시뮬레이션 시작" },
+  "toolbar.pause":        { en: "Pause Simulation",  ko: "시뮬레이션 일시정지" },
+  "toolbar.stop":         { en: "Stop Simulation",   ko: "시뮬레이션 정지" },
+  "toolbar.step":         { en: "Step Over",         ko: "스텝 오버" },
+  "toolbar.reload":       { en: "Reload Trace",      ko: "트레이스 리로드" },
+  "toolbar.telemetry":    { en: "Live Telemetry",    ko: "실시간 모니터" },
+  "toolbar.report":       { en: "Report",            ko: "리포트" },
+  "toolbar.target":       { en: "Target: NPU SIM [Local]", ko: "타겟: NPU SIM [로컬]" },
+  "toolbar.config":       { en: "Target Configuration",     ko: "타겟 설정" },
+  "toolbar.debug":        { en: "Debug Mode",        ko: "디버그 모드" },
 
   // Panels
   "panel.aiCopilot":      { en: "AI Copilot",        ko: "AI Copilot" },
@@ -54,6 +82,18 @@ const STRINGS: Record<string, Record<Lang, string>> = {
   "panel.logs":           { en: "Logs",              ko: "로그" },
   "panel.console":        { en: "Console",           ko: "콘솔" },
   "panel.clear":          { en: "Clear",             ko: "지우기" },
+
+  // Common actions
+  "action.open":          { en: "Open",              ko: "열기" },
+  "action.save":          { en: "Save",              ko: "저장" },
+  "action.cancel":        { en: "Cancel",            ko: "취소" },
+  "action.confirm":       { en: "Confirm",           ko: "확인" },
+  "action.delete":        { en: "Delete",            ko: "삭제" },
+  "action.reset":         { en: "Reset",             ko: "초기화" },
+  "action.export":        { en: "Export",            ko: "내보내기" },
+  "action.import":        { en: "Import",            ko: "불러오기" },
+  "action.search":        { en: "Search",            ko: "검색" },
+  "action.refresh":       { en: "Refresh",           ko: "새로고침" },
 
   // Misc
   "btn.send":             { en: "Send",              ko: "전송" },
@@ -113,24 +153,26 @@ function detectInitialLang(): Lang {
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(detectInitialLang);
 
-  const setLang = (l: Lang) => {
+  const setLang = useCallback((l: Lang) => {
     setLangState(l);
     try { localStorage.setItem(LS_KEY, l); } catch { /* ignore */ }
     document.documentElement.setAttribute("lang", l);
-  };
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute("lang", lang);
   }, [lang]);
 
-  const t = (key: string) => {
+  const t = useCallback((key: string) => {
     const entry = STRINGS[key];
     if (!entry) return key;
     return entry[lang] ?? entry.en ?? key;
-  };
+  }, [lang]);
+
+  const value = useMemo(() => ({ lang, setLang, t }), [lang, setLang, t]);
 
   return (
-    <I18nContext.Provider value={{ lang, setLang, t }}>
+    <I18nContext.Provider value={value}>
       {children}
     </I18nContext.Provider>
   );

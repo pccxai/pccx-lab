@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo, memo } from "react";
 import { useTheme } from "./ThemeContext";
 import { Zap, AlertTriangle } from "lucide-react";
 
@@ -30,13 +30,6 @@ function tauriInvoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> 
   return bridge(cmd, args);
 }
 
-const KIND_COLOR: Record<BottleneckInterval["kind"], string> = {
-  dma_read:       "#6a9955",
-  dma_write:      "#dcdcaa",
-  systolic_stall: "#c586c0",
-  barrier_sync:   "#f14c4c",
-};
-
 const KIND_LABEL: Record<BottleneckInterval["kind"], string> = {
   dma_read:       "DMA read",
   dma_write:      "DMA write",
@@ -44,15 +37,21 @@ const KIND_LABEL: Record<BottleneckInterval["kind"], string> = {
   barrier_sync:   "Barrier sync",
 };
 
-/**
- * Table of bottleneck intervals surfaced by the detect_bottlenecks IPC.
- * Re-runs whenever a new trace is loaded.
- */
-export function BottleneckCard() {
+const MAX_VISIBLE_ROWS = 12;
+
+/** Compact card: top-N bottleneck windows from detect_bottlenecks IPC. */
+export const BottleneckCard = memo(function BottleneckCard() {
   const theme = useTheme();
   const [status, setStatus] = useState<Status>({ kind: "idle" });
 
-  const load = async () => {
+  const kindColor = useMemo<Record<BottleneckInterval["kind"], string>>(() => ({
+    dma_read:       theme.success,
+    dma_write:      theme.warning,
+    systolic_stall: theme.accent,
+    barrier_sync:   theme.error,
+  }), [theme.success, theme.warning, theme.accent, theme.error]);
+
+  const load = useCallback(async () => {
     setStatus({ kind: "loading" });
     try {
       const intervals = await tauriInvoke<BottleneckInterval[]>(
@@ -63,7 +62,7 @@ export function BottleneckCard() {
     } catch (err) {
       setStatus({ kind: "error", message: String(err) });
     }
-  };
+  }, []);
 
   useEffect(() => {
     void load();
@@ -73,13 +72,38 @@ export function BottleneckCard() {
       .then(fn => { unlisten = fn; })
       .catch(() => { /* browser preview */ });
     return () => { unlisten?.(); };
-  }, []);
+  }, [load]);
+
+  const cardStyle = useMemo(() => ({
+    background: theme.bgSurface,
+    border: `0.5px solid ${theme.borderSubtle}`,
+    borderRadius: theme.radiusMd,
+    boxShadow: theme.shadowSm,
+    minWidth: 320,
+    transition: `box-shadow 0.2s ${theme.ease}`,
+  }), [theme.bgSurface, theme.borderSubtle, theme.radiusMd, theme.shadowSm, theme.ease]);
+
+  const buttonStyle = useMemo(() => ({
+    background: theme.accentBg,
+    color: theme.accent,
+    border: `0.5px solid ${theme.borderSubtle}`,
+    borderRadius: theme.radiusSm,
+    cursor: status.kind === "loading" ? "wait" as const : "pointer" as const,
+    transition: `background 0.15s ${theme.ease}`,
+  }), [theme.accentBg, theme.accent, theme.borderSubtle, theme.radiusSm, theme.ease, status.kind]);
+
+  const visibleIntervals = useMemo(() => {
+    if (status.kind !== "ok") return [];
+    return status.intervals.slice(0, MAX_VISIBLE_ROWS);
+  }, [status]);
+
+  const overflowCount = useMemo(() => {
+    if (status.kind !== "ok") return 0;
+    return Math.max(0, status.intervals.length - MAX_VISIBLE_ROWS);
+  }, [status]);
 
   return (
-    <div
-      className="flex flex-col gap-3 p-4 rounded-md"
-      style={{ background: theme.bgSurface, border: `1px solid ${theme.border}`, minWidth: 320 }}
-    >
+    <div className="flex flex-col gap-3 p-4" style={cardStyle}>
       <div className="flex items-center gap-2">
         <Zap size={16} style={{ color: theme.accent }} />
         <span style={{ fontWeight: 600, fontSize: 13 }}>Bottleneck Windows</span>
@@ -87,13 +111,8 @@ export function BottleneckCard() {
           <button
             onClick={load}
             disabled={status.kind === "loading"}
-            className="px-2 py-0.5 text-[11px] rounded"
-            style={{
-              background: theme.accentBg,
-              color: theme.accent,
-              border: `1px solid ${theme.border}`,
-              cursor: status.kind === "loading" ? "wait" : "pointer",
-            }}
+            className="px-2 py-0.5 text-[11px]"
+            style={buttonStyle}
           >
             {status.kind === "loading" ? "Scanning…" : "Reload"}
           </button>
@@ -117,16 +136,16 @@ export function BottleneckCard() {
         </div>
       )}
 
-      {status.kind === "ok" && status.intervals.length === 0 && (
+      {status.kind === "ok" && visibleIntervals.length === 0 && (
         <div style={{ fontSize: 12, color: theme.textMuted }}>
-          No windows cross the default 50% threshold — nothing to flag.
+          No windows cross the default 50% threshold -- nothing to flag.
         </div>
       )}
 
-      {status.kind === "ok" && status.intervals.length > 0 && (
+      {status.kind === "ok" && visibleIntervals.length > 0 && (
         <table style={{ fontSize: 11, width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr style={{ color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>
+            <tr style={{ color: theme.textMuted, borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
               <th className="p-1 text-left">Window</th>
               <th className="p-1 text-left">Class</th>
               <th className="p-1 text-right">Share</th>
@@ -134,30 +153,31 @@ export function BottleneckCard() {
             </tr>
           </thead>
           <tbody>
-            {status.intervals.slice(0, 12).map((b, i) => (
-              <tr key={i} style={{ borderBottom: `1px solid ${theme.borderDim}` }}>
+            {visibleIntervals.map((b, i) => (
+              <tr key={i} style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
                 <td className="p-1 font-mono" style={{ color: theme.text }}>
                   {b.start_cycle.toLocaleString()} – {b.end_cycle.toLocaleString()}
                 </td>
                 <td className="p-1">
                   <span
-                    className="px-2 py-0.5 rounded text-[10px] font-semibold"
+                    className="px-2 py-0.5 text-[10px] font-semibold"
                     style={{
-                      color: KIND_COLOR[b.kind],
-                      border: `1px solid ${KIND_COLOR[b.kind]}`,
+                      color: kindColor[b.kind],
+                      border: `0.5px solid ${kindColor[b.kind]}`,
+                      borderRadius: theme.radiusSm,
                     }}
                   >
                     {KIND_LABEL[b.kind]}
                   </span>
                 </td>
                 <td className="p-1 text-right">{(b.share * 100).toFixed(0)}%</td>
-                <td className="p-1 text-right">{b.event_count}</td>
+                <td className="p-1 text-right">{b.event_count.toLocaleString()}</td>
               </tr>
             ))}
-            {status.intervals.length > 12 && (
+            {overflowCount > 0 && (
               <tr>
                 <td colSpan={4} style={{ fontSize: 10, color: theme.textMuted, padding: 4 }}>
-                  +{status.intervals.length - 12} more windows…
+                  +{overflowCount.toLocaleString()} more windows…
                 </td>
               </tr>
             )}
@@ -166,4 +186,4 @@ export function BottleneckCard() {
       )}
     </div>
   );
-}
+});

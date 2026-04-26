@@ -11,6 +11,18 @@ import { useCycleCursor, attachCycleKeybindings, useGoToCycleInput } from "./hoo
 // https://perfetto.dev/docs/contributing/ui-plugins).
 import { useRafScheduler } from "./hooks/useRafScheduler";
 
+// MMAP viewport threshold: traces with more events than this switch to
+// viewport-based streaming instead of loading all events at once.
+const MMAP_EVENT_THRESHOLD = 50_000;
+
+// Debounce interval (ms) for viewport fetch requests during pan/zoom.
+const VIEWPORT_DEBOUNCE_MS = 100;
+
+interface MmapMeta {
+  event_count: number;
+  total_cycles: number;
+}
+
 const EVENT_COLORS: Record<number, { fill: string; label: string }> = {
   0: { fill: "#555555", label: "Unknown"         },
   1: { fill: "#4fc1ff", label: "MAC_COMPUTE"     },
@@ -63,6 +75,15 @@ export function Timeline() {
   const cursor = useCycleCursor();
   const goTo   = useGoToCycleInput(cursor);
 
+  // MMAP viewport mode: auto-detected when the trace exceeds the
+  // threshold. When active, only visible events are fetched from the
+  // Rust backend on each pan/zoom via mmap_viewport IPC.
+  const [mmapMode, setMmapMode]               = useState(false);
+  const [mmapEventCount, setMmapEventCount]   = useState(0);
+  const [viewportLoading, setViewportLoading]  = useState(false);
+  const generationRef  = useRef(0);
+  const debounceTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const vp = useRef({ offset: 0, cpp: 1, dragging: false, lastX: 0, selStart: -1 });
 
   // Round-6 T-3: RAF-coalesced draw scheduler.
@@ -92,16 +113,53 @@ export function Timeline() {
 
     const applyPayload = async (allowDemoFallback: boolean) => {
       try {
-        const payload: Uint8Array = await invoke("fetch_trace_payload");
-        if (payload.byteLength === 0) throw new Error("empty");
-        const parsed = parsePayload(payload);
-        if (cancelled) return;
-        setEvents(parsed);
-        const tc = parsed.reduce((m, e) => Math.max(m, e.start + e.duration), 0);
-        setTotalCycles(tc);
-        setNumCores(parsed.reduce((m, e) => Math.max(m, e.core_id), 0) + 1);
-        if (canvasRef.current) {
-          vp.current.cpp = tc / (canvasRef.current.clientWidth - LANE_LABEL_W);
+        // Probe for MMAP mode first: if the backend exposes mmap_open_trace,
+        // use it to get event count and total cycles. If the event count
+        // exceeds the threshold, stay in mmap mode and skip the full load.
+        let useMmap = false;
+        try {
+          const meta: MmapMeta = await invoke("mmap_open_trace");
+          if (!cancelled && meta.event_count > MMAP_EVENT_THRESHOLD) {
+            useMmap = true;
+            setMmapMode(true);
+            setMmapEventCount(meta.event_count);
+            setTotalCycles(meta.total_cycles);
+            if (canvasRef.current) {
+              vp.current.cpp = meta.total_cycles / (canvasRef.current.clientWidth - LANE_LABEL_W);
+            }
+            // Fetch the full visible viewport (fit-all) without debounce
+            const drawW = canvasRef.current ? canvasRef.current.clientWidth - LANE_LABEL_W : 1000;
+            const endCycle = Math.ceil(vp.current.offset + drawW * vp.current.cpp);
+            const initGen = ++generationRef.current;
+            const initPayload: Uint8Array = await invoke("mmap_viewport", {
+              startCycle: 0,
+              endCycle,
+              generationId: initGen,
+            });
+            if (cancelled) return;
+            if (initGen === generationRef.current && initPayload.byteLength > 0) {
+              const parsed = parsePayload(initPayload);
+              setEvents(parsed);
+              setNumCores(parsed.reduce((m, e) => Math.max(m, e.core_id), 0) + 1);
+            }
+          }
+        } catch {
+          // mmap_open_trace not available — fall through to full-load path
+        }
+
+        if (!useMmap) {
+          const payload: Uint8Array = await invoke("fetch_trace_payload");
+          if (payload.byteLength === 0) throw new Error("empty");
+          const parsed = parsePayload(payload);
+          if (cancelled) return;
+          setMmapMode(false);
+          setEvents(parsed);
+          const tc = parsed.reduce((m, e) => Math.max(m, e.start + e.duration), 0);
+          setTotalCycles(tc);
+          setNumCores(parsed.reduce((m, e) => Math.max(m, e.core_id), 0) + 1);
+          if (canvasRef.current) {
+            vp.current.cpp = tc / (canvasRef.current.clientWidth - LANE_LABEL_W);
+          }
         }
       } catch {
         if (!allowDemoFallback) return;
@@ -122,6 +180,7 @@ export function Timeline() {
           }
         }
         if (cancelled) return;
+        setMmapMode(false);
         setEvents(demo);
         setTotalCycles(demo.reduce((m, e) => Math.max(m, e.start + e.duration), 0));
         setNumCores(8);
@@ -133,10 +192,6 @@ export function Timeline() {
 
     // Initial load: demo fallback if no trace yet.
     void applyPayload(true);
-
-    // No-op placeholder — `totalCycles` is published through the
-    // shared cursor in a dedicated effect below so the snapshot stays
-    // in lock-step with the trace-loaded event listener.
 
     // Subscribe to trace-loaded events so the canvas picks up freshly
     // loaded .pccx files without a manual reload. Only available in the
@@ -296,7 +351,50 @@ export function Timeline() {
     sched.schedule("timeline", draw);
   }, [sched, draw]);
 
-  useEffect(() => { draw(); const ro = new ResizeObserver(() => scheduleDraw()); if (containerRef.current) ro.observe(containerRef.current); return () => ro.disconnect(); }, [draw, scheduleDraw]);
+  // MMAP viewport fetch: debounced request for visible cycle range.
+  // Integrates with the RAF scheduler by scheduling the IPC call through
+  // the same coalescing queue, then triggering a draw on completion.
+  const fetchViewport = useCallback(() => {
+    if (!mmapMode) return;
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const drawW = canvas.clientWidth - LANE_LABEL_W;
+      const startCycle = Math.max(0, Math.floor(vp.current.offset));
+      const endCycle = Math.ceil(vp.current.offset + drawW * vp.current.cpp);
+      const gen = ++generationRef.current;
+      setViewportLoading(true);
+
+      invoke<Uint8Array>("mmap_viewport", {
+        startCycle,
+        endCycle,
+        generationId: gen,
+      })
+        .then((payload) => {
+          // Discard stale responses
+          if (gen !== generationRef.current) return;
+          const parsed = parsePayload(payload);
+          setEvents(parsed);
+          const cores = parsed.reduce((m, e) => Math.max(m, e.core_id), 0) + 1;
+          setNumCores(prev => Math.max(prev, cores));
+          setViewportLoading(false);
+          scheduleDraw();
+        })
+        .catch(() => {
+          if (gen === generationRef.current) setViewportLoading(false);
+        });
+    }, VIEWPORT_DEBOUNCE_MS);
+  }, [mmapMode, scheduleDraw]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, []);
+
+  useEffect(() => { draw(); const ro = new ResizeObserver(() => { scheduleDraw(); fetchViewport(); }); if (containerRef.current) ro.observe(containerRef.current); return () => ro.disconnect(); }, [draw, scheduleDraw, fetchViewport]);
 
   const onWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
@@ -312,7 +410,8 @@ export function Timeline() {
     }
     vp.current.offset = Math.max(0, vp.current.offset);
     scheduleDraw();
-  }, [scheduleDraw]);
+    fetchViewport();
+  }, [scheduleDraw, fetchViewport]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.shiftKey) {
@@ -337,6 +436,7 @@ export function Timeline() {
       vp.current.lastX = e.clientX;
       vp.current.offset = Math.max(0, vp.current.offset - dx * vp.current.cpp);
       scheduleDraw();
+      fetchViewport();
     }
 
     if (mx < 0 || my < 0) { setTooltip(null); return; }
@@ -349,7 +449,7 @@ export function Timeline() {
         text: `${EVENT_COLORS[hit.type_id]?.label ?? "?"}\nCore: ${hit.core_id}\nStart: ${hit.start.toLocaleString()}\nDuration: ${hit.duration.toLocaleString()}\nEnd: ${(hit.start + hit.duration).toLocaleString()}`,
       });
     } else setTooltip(null);
-  }, [events, scheduleDraw]);
+  }, [events, scheduleDraw, fetchViewport]);
 
   const onMouseUp = useCallback((e: React.MouseEvent) => {
     if (vp.current.selStart >= 0) { vp.current.selStart = -1; }
@@ -397,24 +497,26 @@ export function Timeline() {
     if (snapToCycle && vp.current.cpp < 1) vp.current.cpp = 1;
   }, [snapToCycle, cursor.cycle]);
 
-  const fitAll = () => { if (!canvasRef.current || totalCycles === 0) return; vp.current.offset = 0; vp.current.cpp = totalCycles / (canvasRef.current.clientWidth - LANE_LABEL_W); setSelection(null); scheduleDraw(); };
-  const zoomToSelection = () => { if (!selection || !canvasRef.current) return; const s = Math.min(selection.start, selection.end); const e = Math.max(selection.start, selection.end); vp.current.offset = s; vp.current.cpp = (e - s) / (canvasRef.current.clientWidth - LANE_LABEL_W); scheduleDraw(); };
+  const fitAll = () => { if (!canvasRef.current || totalCycles === 0) return; vp.current.offset = 0; vp.current.cpp = totalCycles / (canvasRef.current.clientWidth - LANE_LABEL_W); setSelection(null); scheduleDraw(); fetchViewport(); };
+  const zoomToSelection = () => { if (!selection || !canvasRef.current) return; const s = Math.min(selection.start, selection.end); const e = Math.max(selection.start, selection.end); vp.current.offset = s; vp.current.cpp = (e - s) / (canvasRef.current.clientWidth - LANE_LABEL_W); scheduleDraw(); fetchViewport(); };
 
-  const btnStyle: React.CSSProperties = { fontSize: 10, padding: "2px 8px", borderRadius: 3, background: theme.bgSurface, color: theme.textDim, border: `1px solid ${theme.border}`, cursor: "pointer" };
+  const btnStyle: React.CSSProperties = { fontSize: 10, padding: "2px 8px", borderRadius: 3, background: theme.bgSurface, color: theme.textDim, border: `0.5px solid ${theme.borderSubtle}`, cursor: "pointer" };
 
   return (
     <div ref={rootRef} tabIndex={0} className="w-full h-full flex flex-col outline-none" style={{ background: bgDeep }}>
       {/* Toolbar */}
-      <div className="flex items-center px-3 gap-3 shrink-0" style={{ height: 30, borderBottom: `1px solid ${theme.border}`, background: bgPanel }}>
+      <div className="flex items-center px-3 gap-3 shrink-0" style={{ height: 30, borderBottom: `0.5px solid ${theme.borderSubtle}`, background: bgPanel }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: dimText, letterSpacing: "0.05em" }}>TIMELINE</span>
         <button onClick={fitAll} style={btnStyle}>Fit All</button>
         {selection && <button onClick={zoomToSelection} style={{ ...btnStyle, background: theme.accentBg, color: theme.accent, borderColor: theme.accentDim }}>Zoom to Selection</button>}
         <button onClick={() => { setMarkers([]); scheduleDraw(); }} style={btnStyle}>Clear Markers</button>
         {selection && <span style={{ fontSize: 9, color: theme.accent }}>Selected: {Math.abs(selection.end - selection.start).toLocaleString()} cycles</span>}
         {loading && <span style={{ fontSize: 10, color: dimText }} className="animate-pulse">Loading...</span>}
+        {viewportLoading && <span style={{ fontSize: 10, color: theme.accent }} className="animate-pulse">Loading viewport...</span>}
+        {mmapMode && <span style={{ fontSize: 9, color: theme.textMuted, background: theme.accentBg, padding: "1px 5px", borderRadius: 3 }}>MMAP</span>}
 
         {/* Round-6 T-1: cycle cursor readout + "Go to cycle N" + snap toggle */}
-        <span style={{ fontSize: 9, color: theme.textMuted, marginLeft: 10, fontFamily: "monospace" }}>
+        <span style={{ fontSize: 9, color: theme.textMuted, marginLeft: 10, fontFamily: theme.fontMono }}>
           cyc {cursor.cycle.toLocaleString()} / {Math.max(totalCycles, cursor.totalCycles).toLocaleString()}
         </span>
         <label style={{ fontSize: 9, color: theme.textMuted, display: "inline-flex", alignItems: "center", gap: 4 }}
@@ -430,7 +532,7 @@ export function Timeline() {
             style={{
               width: 70, height: 18, fontSize: 9, padding: "0 4px",
               background: theme.bgSurface, color: theme.text,
-              border: `1px solid ${theme.border}`, borderRadius: 2, outline: "none",
+              border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 2, outline: "none",
             }}
           />
         </label>
@@ -449,7 +551,7 @@ export function Timeline() {
             style={{
               width: 100, height: 18, fontSize: 9, padding: "0 6px",
               background: theme.bgSurface, color: theme.text,
-              border: `1px solid ${theme.border}`, borderRadius: 2,
+              border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 2,
               outline: "none"
             }} 
             onChange={() => {
@@ -492,7 +594,7 @@ export function Timeline() {
           {tooltip && (
             <div className="absolute z-50 pointer-events-none rounded px-2 py-1.5 shadow-xl" style={{
               left: tooltip.x, top: tooltip.y, fontSize: 10, whiteSpace: "pre",
-              background: theme.bgSurface, color: theme.text, border: `1px solid ${theme.border}`,
+              background: theme.bgSurface, color: theme.text, border: `0.5px solid ${theme.borderSubtle}`,
             }}>
               {tooltip.text}
             </div>
@@ -500,7 +602,7 @@ export function Timeline() {
         </div>
 
         {(selectedEvent || stats) && (
-          <div className="shrink-0 overflow-y-auto" style={{ width: 180, borderLeft: `1px solid ${theme.border}`, background: bgPanel, padding: 12 }}>
+          <div className="shrink-0 overflow-y-auto" style={{ width: 180, borderLeft: `0.5px solid ${theme.borderSubtle}`, background: bgPanel, padding: 12 }}>
             {selectedEvent && (
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 9, fontWeight: 700, color: dimText, marginBottom: 4, letterSpacing: "0.05em" }}>SELECTED EVENT</div>
@@ -517,7 +619,8 @@ export function Timeline() {
               <div>
                 <div style={{ fontSize: 9, fontWeight: 700, color: dimText, marginBottom: 4, letterSpacing: "0.05em" }}>TRACE STATS</div>
                 <div style={{ fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
-                  <div>Total events: {events.length.toLocaleString()}</div>
+                  <div>Total events: {(mmapMode ? mmapEventCount : events.length).toLocaleString()}</div>
+                  {mmapMode && <div>Viewport events: {events.length.toLocaleString()}</div>}
                   <div>Total cycles: {totalCycles.toLocaleString()}</div>
                   <div>Avg duration: {stats.avg.toFixed(0)}</div>
                   <div>Live rate: {liveHasTrace ? `${liveEventRate.toFixed(1)} ev/s` : "idle"}</div>
@@ -532,6 +635,24 @@ export function Timeline() {
             )}
           </div>
         )}
+      </div>
+
+      {/* Cycle scrubber */}
+      <div className="shrink-0 flex items-center px-3 gap-2" style={{ height: 20, borderTop: `0.5px solid ${theme.borderSubtle}`, background: bgPanel }}>
+        <span style={{ fontSize: 8, color: dimText, fontFamily: theme.fontMono, minWidth: 48 }}>
+          {cursor.cycle.toLocaleString()}
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={Math.max(totalCycles, cursor.totalCycles)}
+          value={cursor.cycle}
+          onChange={e => cursor.setCycle(Number(e.target.value))}
+          style={{ flex: 1, height: 4, accentColor: theme.accent, cursor: "pointer" }}
+        />
+        <span style={{ fontSize: 8, color: dimText, fontFamily: theme.fontMono, minWidth: 48, textAlign: "right" }}>
+          {Math.max(totalCycles, cursor.totalCycles).toLocaleString()}
+        </span>
       </div>
     </div>
   );

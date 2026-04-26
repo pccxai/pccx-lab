@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTheme } from "./ThemeContext";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLiveWindow } from "./hooks/useLiveWindow";
 import {
   FileText, Download, Check, Loader2, BarChart2,
@@ -36,12 +37,11 @@ const DEFAULT_SECTIONS: Section[] = [
 
 function PreviewSection({ section, data }: { section: Section; data: any }) {
   const theme = useTheme();
-  const isDark = theme.mode === "dark";
   const headColor = theme.accent;
   const textColor = theme.text;
   const dimColor  = theme.textMuted;
   const cardBg    = theme.bgSurface;
-  const cardBdr   = theme.border;
+  const cardBdr   = theme.borderSubtle;
 
   switch (section.id) {
     case "executive":
@@ -59,9 +59,9 @@ function PreviewSection({ section, data }: { section: Section; data: any }) {
               { label: "Peak TOPS",    val: data?.peakTops?.toFixed(2) ?? "—" },
               { label: "Wall Time",    val: `${((data?.cycles ?? 0) / 1000).toFixed(1)} µs` },
             ].map(m => (
-              <div key={m.label} style={{ padding: "8px 16px", background: cardBg, border: `1px solid ${cardBdr}`, borderRadius: 6, minWidth: 100 }}>
+              <div key={m.label} style={{ padding: "8px 16px", background: cardBg, border: `0.5px solid ${cardBdr}`, borderRadius: 6, minWidth: 100 }}>
                 <div style={{ fontSize: 9, color: dimColor, marginBottom: 2 }}>{m.label}</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: headColor, fontFamily: "JetBrains Mono, monospace" }}>{m.val}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: headColor, fontFamily: theme.fontMono }}>{m.val}</div>
               </div>
             ))}
           </div>
@@ -84,9 +84,9 @@ function PreviewSection({ section, data }: { section: Section; data: any }) {
                 ["Pipeline",      "10 stages"],
                 ["Precision",     "BF16 / INT8"],
               ].map(([k, v]) => (
-                <tr key={k as string} style={{ borderBottom: `1px solid ${cardBdr}` }}>
+                <tr key={k as string} style={{ borderBottom: `0.5px solid ${cardBdr}` }}>
                   <td style={{ padding: "4px 8px", color: dimColor, width: "40%" }}>{k}</td>
-                  <td style={{ padding: "4px 8px", fontFamily: "monospace", fontWeight: 500 }}>{v}</td>
+                  <td style={{ padding: "4px 8px", fontFamily: theme.fontMono, fontWeight: 500 }}>{v}</td>
                 </tr>
               ))}
             </tbody>
@@ -120,7 +120,7 @@ function PreviewSection({ section, data }: { section: Section; data: any }) {
                 return (
                   <div key={core_id} style={{
                     width: 28, height: 28, borderRadius: 3, background: color + "33",
-                    border: `1px solid ${color}55`, display: "flex", alignItems: "center",
+                    border: `0.5px solid ${color}55`, display: "flex", alignItems: "center",
                     justifyContent: "center", fontSize: 8, color, fontWeight: 600,
                   }}>
                     {util_pct.toFixed(0)}
@@ -137,9 +137,9 @@ function PreviewSection({ section, data }: { section: Section; data: any }) {
       return (
         <div>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: headColor, marginBottom: 8 }}>5. Bottleneck Analysis</h3>
-          <div style={{ padding: 12, background: isDark ? "#1c1917" : "#fef9c3", border: `1px solid ${isDark ? "#854d0e" : "#fbbf24"}`, borderRadius: 6, marginBottom: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: isDark ? "#fbbf24" : "#92400e" }}>Warning: AXI Bus Contention Detected</div>
-            <div style={{ fontSize: 10, color: isDark ? "#fde68a" : "#78350f", marginTop: 4 }}>
+          <div style={{ padding: 12, background: theme.warningBg, border: `0.5px solid ${theme.warning}`, borderRadius: 6, marginBottom: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: theme.warningText }}>Warning: AXI Bus Contention Detected</div>
+            <div style={{ fontSize: 10, color: theme.warningText, opacity: 0.8, marginTop: 4 }}>
               32 cores issuing simultaneous DMA reads cause bus bandwidth to drop to 0.5 B/cycle per core.
               Estimated performance loss: 23% from contention overhead.
             </div>
@@ -154,7 +154,7 @@ function PreviewSection({ section, data }: { section: Section; data: any }) {
       return (
         <div>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: headColor, marginBottom: 8 }}>6. Roofline Analysis</h3>
-          <div style={{ padding: 12, background: cardBg, border: `1px solid ${cardBdr}`, borderRadius: 6 }}>
+          <div style={{ padding: 12, background: cardBg, border: `0.5px solid ${cardBdr}`, borderRadius: 6 }}>
             <div style={{ fontSize: 11, color: textColor, lineHeight: 1.6 }}>
               <div>Arithmetic Intensity: <strong>16.0 MAC/byte</strong> (64×64×64 BF16 tile)</div>
               <div>Memory Roof: <strong>64 B/cycle</strong> (dual-port BRAM)</div>
@@ -189,14 +189,14 @@ function PreviewSection({ section, data }: { section: Section; data: any }) {
                 ["Trace format",     ".pccx 0.2 (major 0x01 · minor 0x01 · CRC-32)"],
                 ["Aggregation",      "Per-op mean over 3 consecutive decode steps"],
               ].map(([k, v]) => (
-                <tr key={k as string} style={{ borderBottom: `1px solid ${cardBdr}` }}>
+                <tr key={k as string} style={{ borderBottom: `0.5px solid ${cardBdr}` }}>
                   <td style={{ padding: "4px 8px", color: dimColor, width: "32%" }}>{k}</td>
-                  <td style={{ padding: "4px 8px", fontFamily: "monospace" }}>{v}</td>
+                  <td style={{ padding: "4px 8px", fontFamily: theme.fontMono }}>{v}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div style={{ fontSize: 10, color: dimColor, padding: 10, background: cardBg, borderRadius: 4, border: `1px solid ${cardBdr}` }}>
+          <div style={{ fontSize: 10, color: dimColor, padding: 10, background: cardBg, borderRadius: 4, border: `0.5px solid ${cardBdr}` }}>
             Assumptions: (1) DRAM rows are warm (no refresh penalty mid-trace),
             (2) the measurement window excludes the initial weight preload,
             (3) the PLE shadow stream runs at half the decode cadence.
@@ -228,12 +228,12 @@ function PreviewSection({ section, data }: { section: Section; data: any }) {
                 ["SFU softmax",      3.8,    180, 140,  99.0, "SFU-bound"],
                 ["DMA weight tile", 0.25,    640, 5.0,  94.0, "DDR-bound"],
               ].map((row, i) => (
-                <tr key={i} style={{ borderBottom: `1px solid ${cardBdr}`, color: textColor }}>
+                <tr key={i} style={{ borderBottom: `0.5px solid ${cardBdr}`, color: textColor }}>
                   <td style={{ padding: "4px 8px" }}>{row[0]}</td>
-                  <td style={{ padding: "4px 8px", textAlign: "right", fontFamily: "monospace" }}>{(row[1] as number).toFixed(2)}</td>
-                  <td style={{ padding: "4px 8px", textAlign: "right", fontFamily: "monospace" }}>{(row[2] as number).toLocaleString()}</td>
-                  <td style={{ padding: "4px 8px", textAlign: "right", fontFamily: "monospace" }}>{(row[3] as number).toFixed(0)}</td>
-                  <td style={{ padding: "4px 8px", textAlign: "right", fontFamily: "monospace", color: (row[4] as number) > 80 ? "#22c55e" : (row[4] as number) > 50 ? "#eab308" : "#ef4444" }}>
+                  <td style={{ padding: "4px 8px", textAlign: "right", fontFamily: theme.fontMono }}>{(row[1] as number).toFixed(2)}</td>
+                  <td style={{ padding: "4px 8px", textAlign: "right", fontFamily: theme.fontMono }}>{(row[2] as number).toLocaleString()}</td>
+                  <td style={{ padding: "4px 8px", textAlign: "right", fontFamily: theme.fontMono }}>{(row[3] as number).toFixed(0)}</td>
+                  <td style={{ padding: "4px 8px", textAlign: "right", fontFamily: theme.fontMono, color: (row[4] as number) > 80 ? "#22c55e" : (row[4] as number) > 50 ? "#eab308" : "#ef4444" }}>
                     {(row[4] as number).toFixed(1)}
                   </td>
                   <td style={{ padding: "4px 8px", fontSize: 9, color: dimColor }}>{row[5] as string}</td>
@@ -248,8 +248,8 @@ function PreviewSection({ section, data }: { section: Section; data: any }) {
       return (
         <div>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: headColor, marginBottom: 8 }}>8. Verification Status</h3>
-          <div style={{ padding: 10, background: isDark ? "#0f2815" : "#dcfce7", border: `1px solid ${isDark ? "#166534" : "#22c55e"}`, borderRadius: 6, marginBottom: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: isDark ? "#4ade80" : "#14532d" }}>6 / 6 testbenches PASS · 1930 cycles total</div>
+          <div style={{ padding: 10, background: theme.successBg, border: `0.5px solid ${theme.success}`, borderRadius: 6, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: theme.successText }}>6 / 6 testbenches PASS · 1930 cycles total</div>
           </div>
           <table style={{ width: "100%", fontSize: 10, borderCollapse: "collapse" }}>
             <thead>
@@ -268,15 +268,15 @@ function PreviewSection({ section, data }: { section: Section; data: any }) {
                 ["tb_barrel_shifter_BF16",            512, "PASS"],
                 ["tb_ctrl_npu_decoder",                 6, "PASS"],
               ].map((r, i) => (
-                <tr key={i} style={{ borderBottom: `1px solid ${cardBdr}`, color: textColor }}>
-                  <td style={{ padding: "4px 8px", fontFamily: "monospace" }}>{r[0]}</td>
-                  <td style={{ padding: "4px 8px", textAlign: "right", fontFamily: "monospace" }}>{(r[1] as number).toLocaleString()}</td>
+                <tr key={i} style={{ borderBottom: `0.5px solid ${cardBdr}`, color: textColor }}>
+                  <td style={{ padding: "4px 8px", fontFamily: theme.fontMono }}>{r[0]}</td>
+                  <td style={{ padding: "4px 8px", textAlign: "right", fontFamily: theme.fontMono }}>{(r[1] as number).toLocaleString()}</td>
                   <td style={{ padding: "4px 8px", color: "#22c55e", fontWeight: 600 }}>{r[2] as string}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div style={{ marginTop: 10, padding: 10, background: cardBg, border: `1px solid ${cardBdr}`, borderRadius: 4, fontSize: 10, color: textColor }}>
+          <div style={{ marginTop: 10, padding: 10, background: cardBg, border: `0.5px solid ${cardBdr}`, borderRadius: 4, fontSize: 10, color: textColor }}>
             Vivado post-synth WNS: <strong style={{ color: "#eab308" }}>-9.792 ns</strong> on core_clk · 4194 failing endpoints.
             Retiming suggested for <code>u_gemv_top</code> / <code>u_mem_dispatcher</code>.
           </div>
@@ -300,8 +300,8 @@ function PreviewSection({ section, data }: { section: Section; data: any }) {
                 ["AI",     "Arithmetic intensity — operations per byte transferred across the memory hierarchy."],
                 ["WNS",    "Worst negative slack — critical-path timing margin in ns; negative means missed."],
               ].map(([k, v]) => (
-                <tr key={k as string} style={{ borderBottom: `1px solid ${cardBdr}` }}>
-                  <td style={{ padding: "4px 8px", color: headColor, fontWeight: 700, fontFamily: "monospace", width: "20%" }}>{k}</td>
+                <tr key={k as string} style={{ borderBottom: `0.5px solid ${cardBdr}` }}>
+                  <td style={{ padding: "4px 8px", color: headColor, fontWeight: 700, fontFamily: theme.fontMono, width: "20%" }}>{k}</td>
                   <td style={{ padding: "4px 8px", color: textColor }}>{v}</td>
                 </tr>
               ))}
@@ -381,28 +381,28 @@ export function ReportBuilder() {
 
   const bg      = theme.bg;
   const cardBg  = theme.bgSurface;
-  const border  = theme.border;
+  const border  = theme.borderSubtle;
   const textCol = theme.text;
   const dimCol  = theme.textMuted;
 
   return (
     <div className="w-full h-full flex overflow-hidden" style={{ background: bg }}>
       {/* Left: Config panel */}
-      <div className="shrink-0 flex flex-col overflow-y-auto" style={{ width: 260, borderRight: `1px solid ${border}`, background: theme.bgPanel }}>
-        <div style={{ padding: "16px 16px 8px", borderBottom: `1px solid ${border}` }}>
+      <div className="shrink-0 flex flex-col overflow-y-auto" style={{ width: 260, borderRight: `0.5px solid ${border}`, background: theme.bgPanel }}>
+        <div style={{ padding: "16px 16px 8px", borderBottom: `0.5px solid ${border}` }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: textCol, marginBottom: 8 }}>Report Configuration</div>
           <div style={{ marginBottom: 8 }}>
             <label style={{ fontSize: 9, color: dimCol, display: "block", marginBottom: 2 }}>Title</label>
             <input value={reportTitle} onChange={e => setReportTitle(e.target.value)} style={{
               width: "100%", fontSize: 10, padding: "4px 8px", background: theme.bgInput,
-              border: `1px solid ${border}`, borderRadius: 4, color: textCol, outline: "none",
+              border: `0.5px solid ${border}`, borderRadius: 4, color: textCol, outline: "none",
             }} />
           </div>
           <div style={{ marginBottom: 8 }}>
             <label style={{ fontSize: 9, color: dimCol, display: "block", marginBottom: 2 }}>Author</label>
             <input value={author} onChange={e => setAuthor(e.target.value)} style={{
               width: "100%", fontSize: 10, padding: "4px 8px", background: theme.bgInput,
-              border: `1px solid ${border}`, borderRadius: 4, color: textCol, outline: "none",
+              border: `0.5px solid ${border}`, borderRadius: 4, color: textCol, outline: "none",
             }} />
           </div>
           <div style={{ fontSize: 9, color: dimCol }}>
@@ -410,29 +410,9 @@ export function ReportBuilder() {
           </div>
         </div>
 
-        <div style={{ padding: "8px 16px" }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: dimCol, marginBottom: 8 }}>Sections</div>
-          {sections.map(sec => (
-            <label key={sec.id} style={{
-              display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0",
-              borderBottom: `1px solid ${border}`, cursor: "pointer",
-            }}>
-              <input type="checkbox" checked={sec.enabled}
-                onChange={() => toggleSection(sec.id)}
-                style={{ marginTop: 2, accentColor: theme.accent }} />
-              <div>
-                <div style={{ fontSize: 11, color: textCol, fontWeight: sec.enabled ? 500 : 400 }}>
-                  {sec.icon} {sec.label}
-                </div>
-                <div style={{ fontSize: 9, color: dimCol, marginTop: 1 }}>{sec.description}</div>
-              </div>
-            </label>
-          ))}
-        </div>
+        <SectionCheckboxList sections={sections} onToggle={toggleSection} />
 
-        <div className="flex-1" />
-
-        <div style={{ padding: 16, borderTop: `1px solid ${border}` }}>
+        <div style={{ padding: 16, borderTop: `0.5px solid ${border}` }}>
           <button
             onClick={handleGenerate}
             disabled={generating}
@@ -457,7 +437,7 @@ export function ReportBuilder() {
 
       {/* Right: Live preview */}
       <div className="flex-1 flex flex-col min-w-0">
-        <div style={{ padding: "8px 16px", borderBottom: `1px solid ${border}`, background: theme.bgPanel }}>
+        <div style={{ padding: "8px 16px", borderBottom: `0.5px solid ${border}`, background: theme.bgPanel }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: dimCol, letterSpacing: "0.05em" }}>REPORT PREVIEW</span>
           <span style={{ fontSize: 9, color: dimCol, marginLeft: 12 }}>{enabledSections.length} sections enabled</span>
         </div>
@@ -485,15 +465,70 @@ export function ReportBuilder() {
 
           {/* Sections */}
           {enabledSections.map(sec => (
-            <div key={sec.id} style={{ marginBottom: 24, padding: 16, background: cardBg, border: `1px solid ${border}`, borderRadius: 8 }}>
+            <div key={sec.id} style={{ marginBottom: 24, padding: 16, background: cardBg, border: `0.5px solid ${border}`, borderRadius: 8 }}>
               <PreviewSection section={sec} data={{ ...traceData, coreUtils }} />
             </div>
           ))}
 
           {/* Footer */}
-          <div style={{ marginTop: 32, paddingTop: 16, borderTop: `1px solid ${border}`, fontSize: 9, color: dimCol, textAlign: "center" }}>
+          <div style={{ marginTop: 32, paddingTop: 16, borderTop: `0.5px solid ${border}`, fontSize: 9, color: dimCol, textAlign: "center" }}>
             Generated by pccx-lab v0.4.0 · .pccx format v0.2 · {new Date().toISOString()}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Virtualized Section Checkbox List ──────────────────────────────────── */
+
+const SECTION_ROW_HEIGHT = 60;
+
+function SectionCheckboxList({ sections, onToggle }: { sections: Section[]; onToggle: (id: string) => void }) {
+  const theme = useTheme();
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: sections.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => SECTION_ROW_HEIGHT,
+    overscan: 5,
+  });
+
+  return (
+    <div style={{ padding: "8px 16px", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: theme.textMuted, marginBottom: 8 }}>Sections</div>
+      <div ref={parentRef} style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          {virtualizer.getVirtualItems().map((vi) => {
+            const sec = sections[vi.index];
+            return (
+              <label
+                key={sec.id}
+                style={{
+                  position: "absolute", top: 0, left: 0, width: "100%",
+                  height: vi.size,
+                  transform: `translateY(${vi.start}px)`,
+                  display: "flex", alignItems: "flex-start", gap: 8,
+                  padding: "6px 0",
+                  borderBottom: `0.5px solid ${theme.borderSubtle}`,
+                  cursor: "pointer", boxSizing: "border-box",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={sec.enabled}
+                  onChange={() => onToggle(sec.id)}
+                  style={{ marginTop: 2, accentColor: theme.accent }}
+                />
+                <div>
+                  <div style={{ fontSize: 11, color: theme.text, fontWeight: sec.enabled ? 500 : 400 }}>
+                    {sec.icon} {sec.label}
+                  </div>
+                  <div style={{ fontSize: 9, color: theme.textMuted, marginTop: 1 }}>{sec.description}</div>
+                </div>
+              </label>
+            );
+          })}
         </div>
       </div>
     </div>

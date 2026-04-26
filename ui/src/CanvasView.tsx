@@ -3,41 +3,31 @@ import * as THREE from "three";
 import { invoke } from "@tauri-apps/api/core";
 import { useVisibilityGate } from "./hooks/useVisibilityGate";
 
-// MAC array dimensions — must match HardwareModel::pccx_reference()
 const ROWS = 32;
 const COLS = 32;
 const COUNT = ROWS * COLS;
 
-/** Maps [0,1] utilisation to an HSL colour (blue=idle → green=active → red=hot). */
-function utilToColor(util: number): THREE.Color {
-  // cold: hue=220 (blue) → warm: hue=120 (green) → hot: hue=0 (red)
+const _tmpHsl = new THREE.Color();
+
+/** Maps [0,1] utilisation to RGB bytes (blue=idle, green=active, red=hot). */
+function utilToRgb(util: number): [number, number, number] {
   const hue = (1.0 - util) * 220;
-  return new THREE.Color().setHSL(hue / 360, 0.9, 0.55);
+  const c = _tmpHsl.setHSL(hue / 360, 0.9, 0.55);
+  return [Math.round(c.r * 255), Math.round(c.g * 255), Math.round(c.b * 255)];
 }
 
-// Round-5 T-3: `animated` gates the ornamental colour pulse wave.
-// When false (e.g. paused playback) the array renders static per-core
-// utilisation only — no decorative heartbeat.  Default true preserves
-// the existing <CanvasView /> call sites.
 interface CanvasViewProps { animated?: boolean; isPlaying?: boolean }
 
 export function CanvasView({ animated = true, isPlaying }: CanvasViewProps = {}) {
-  // `isPlaying` is the canonical name; `animated` is the prop alias
-  // the ticket calls out.  Treat either as the animation gate.
   const animationEnabled = isPlaying ?? animated;
   const animRef = useRef<boolean>(animationEnabled);
   animRef.current = animationEnabled;
   const mountRef  = useRef<HTMLDivElement>(null);
   const animIdRef = useRef<number>(0);
-  // Round-6 T-3: pause the RAF loop when the 3D-View tab is hidden or
-  // the panel is docked off-screen.  MDN Page Visibility API + DOM
-  // IntersectionObserver — an Apple-grade app never renders an
-  // off-screen tab (spec: https://w3c.github.io/page-visibility/).
   const visible = useVisibilityGate(mountRef);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
 
-  // Mouse state for orbit-like rotation
   const mouse = useRef({ dragging: false, lastX: 0, lastY: 0, rotX: 0.3, rotY: 0.4 });
 
   const setupMouseHandlers = useCallback((
@@ -85,7 +75,6 @@ export function CanvasView({ animated = true, isPlaying }: CanvasViewProps = {})
     const w = container.clientWidth;
     const h = container.clientHeight;
 
-    // ─── Scene Setup ────────────────────────────────────────────────
     const scene    = new THREE.Scene();
     const camera   = new THREE.PerspectiveCamera(60, w / h, 0.1, 1000);
     camera.position.set(0, 0, 28);
@@ -96,36 +85,85 @@ export function CanvasView({ animated = true, isPlaying }: CanvasViewProps = {})
     renderer.setClearColor(0x000000, 0);
     container.appendChild(renderer.domElement);
 
-    // ─── Instanced MAC Array ────────────────────────────────────────
+    // DataTexture for instance colours — avoids per-frame
+    // InstancedBufferAttribute upload via setColorAt().
+    const texData = new Uint8Array(COLS * ROWS * 4);
+    const colorTex = new THREE.DataTexture(
+      texData, COLS, ROWS,
+      THREE.RGBAFormat, THREE.UnsignedByteType,
+    );
+    colorTex.minFilter = THREE.NearestFilter;
+    colorTex.magFilter = THREE.NearestFilter;
+    colorTex.generateMipmaps = false;
+    colorTex.needsUpdate = true;
+
     const geo  = new THREE.BoxGeometry(0.78, 0.78, 0.78);
     const mat  = new THREE.MeshStandardMaterial({
       roughness: 0.25,
       metalness: 0.85,
-      vertexColors: false,
     });
+
+    // Inject DataTexture sampling into the standard PBR shader so we
+    // keep lighting, roughness, metalness without reimplementing them.
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uInstColors = { value: colorTex };
+
+      // Vertex: compute UV from gl_InstanceID, pass to fragment.
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <common>",
+        `#include <common>
+varying vec2 vInstUV;`,
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+vInstUV = (vec2(mod(float(gl_InstanceID), ${COLS}.0),
+                floor(float(gl_InstanceID) / ${COLS}.0)) + 0.5) / ${COLS}.0;`,
+      );
+
+      // Fragment: sample the texture and apply as diffuse colour.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <common>",
+        `#include <common>
+uniform sampler2D uInstColors;
+varying vec2 vInstUV;`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+diffuseColor.rgb = texture2D(uInstColors, vInstUV).rgb;`,
+      );
+    };
+
     const mesh = new THREE.InstancedMesh(geo, mat, COUNT);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
     const dummy = new THREE.Object3D();
-    let   idx   = 0;
     for (let x = 0; x < COLS; x++) {
       for (let y = 0; y < ROWS; y++) {
+        const idx = x * ROWS + y;
         dummy.position.set(x - COLS / 2 + 0.5, y - ROWS / 2 + 0.5, 0);
         dummy.updateMatrix();
         mesh.setMatrixAt(idx, dummy.matrix);
-        mesh.setColorAt(idx, utilToColor(0.15)); // start as "cold"
-        idx++;
+
+        // Write initial "cold" colour into the texture buffer.
+        const [r, g, b] = utilToRgb(0.15);
+        const off = idx * 4;
+        texData[off]     = r;
+        texData[off + 1] = g;
+        texData[off + 2] = b;
+        texData[off + 3] = 255;
       }
     }
     mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    colorTex.needsUpdate = true;
+
     mouse.current.rotX = 0.3;
     mouse.current.rotY = 0.4;
     mesh.rotation.x = mouse.current.rotX;
     mesh.rotation.y = mouse.current.rotY;
     scene.add(mesh);
 
-    // ─── Lights ─────────────────────────────────────────────────────
     const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
     dirLight.position.set(12, 12, 15);
     scene.add(dirLight);
@@ -134,80 +172,63 @@ export function CanvasView({ animated = true, isPlaying }: CanvasViewProps = {})
     rimLight.position.set(-10, -8, -5);
     scene.add(rimLight);
 
-    // ─── Grid Helper (floor reference) ──────────────────────────────
     const grid = new THREE.GridHelper(COLS, COLS, 0x1a1a2e, 0x1a1a2e);
     grid.position.y = -(ROWS / 2) - 1;
     scene.add(grid);
 
-    // ─── Load live utilisation data ─────────────────────────────────
+    // Cache base colours per instance for the animation pulse.
+    const baked = new Uint8Array(COUNT * 3);
+    for (let i = 0; i < COUNT; i++) {
+      const [r, g, b] = utilToRgb(0.15);
+      baked[i * 3]     = r;
+      baked[i * 3 + 1] = g;
+      baked[i * 3 + 2] = b;
+    }
+
+    // Load live utilisation data.
     invoke<{ core_utils: { core_id: number; util_pct: number }[] }>(
       "get_core_utilisation"
     )
       .then(({ core_utils }) => {
         const utilMap = new Map(core_utils.map((c) => [c.core_id, c.util_pct / 100]));
-        let i2 = 0;
         for (let x = 0; x < COLS; x++) {
           for (let y = 0; y < ROWS; y++) {
-            // Map 2-D position → core_id (row-major)
+            const idx = x * ROWS + y;
             const coreId = y * COLS + x;
-            const util   = utilMap.get(coreId % core_utils.length) ?? 0.15;
-            mesh.setColorAt(i2, utilToColor(util));
-            i2++;
+            const util = utilMap.get(coreId % core_utils.length) ?? 0.15;
+            const [r, g, b] = utilToRgb(util);
+            const off = idx * 4;
+            texData[off]     = r;
+            texData[off + 1] = g;
+            texData[off + 2] = b;
+            // Update baked cache for pulse animation.
+            baked[idx * 3]     = r;
+            baked[idx * 3 + 1] = g;
+            baked[idx * 3 + 2] = b;
           }
         }
-        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        colorTex.needsUpdate = true;
       })
-      .catch(() => {
-        // Keep "cold" colours if no trace is loaded
-      });
+      .catch(() => { /* keep "cold" colours if no trace is loaded */ });
 
-    // ─── Pulsing animation: simulate live MAC activity ───────────────
-    // Visibility-gated RAF loop with sparse instance-colour updates.
-    // Only columns whose wave-scalar differs from the previous frame
-    // trigger setColorAt — cuts per-frame work from O(COUNT) to
-    // O(active columns).
-    //
-    // Cache the baked per-instance colour so we don't pay a
-    // `getColorAt` per frame — reads from the InstancedBufferAttribute
-    // round-trip through a THREE.Color alloc and cost real time.
-    const baked: { r: number; g: number; b: number }[] = [];
-    for (let i = 0; i < COUNT; i++) {
-      const c = new THREE.Color();
-      mesh.getColorAt(i, c);
-      baked.push({ r: c.r, g: c.g, b: c.b });
-    }
-    // Last-applied scalar per column so we only touch dirty instances.
+    // Sparse column-level dirty check — same threshold as before.
     const lastWave = new Float32Array(COLS);
     for (let i = 0; i < COLS; i++) lastWave[i] = NaN;
-    const DIRTY_EPS = 1 / 256; // 8-bit colour resolution threshold
-    // Pre-allocated Color for reuse in the animate loop (avoids per-
-    // instance allocation on every dirty column each frame).
-    const tmpColor = new THREE.Color();
+    const DIRTY_EPS = 1 / 256;
 
     let phase = 0;
     const animate = () => {
       animIdRef.current = requestAnimationFrame(animate);
-
-      // Round-6 T-3: skip the entire loop body when the panel is not
-      // visible (tab hidden / docked panel collapsed).  Browsers
-      // already auto-throttle main-thread RAF on hidden tabs, but we
-      // additionally bail before touching the WebGL queue so the GPU
-      // goes idle within one frame.
       if (!visibleRef.current) return;
 
       phase += 0.018;
 
-      // Slow auto-rotate when not dragging
       if (!mouse.current.dragging) {
         mouse.current.rotY += 0.0008;
         mesh.rotation.y = mouse.current.rotY;
       }
 
       if (animRef.current) {
-        // Sparse update: per-column wave scalar; only re-upload the
-        // instance colours whose column's scalar drifted by more than
-        // an 8-bit threshold.  On a stable frame `setColorAt` fires
-        // for zero instances.
         let anyDirty = false;
         for (let x = 0; x < COLS; x++) {
           const wave = 0.5 + 0.5 * Math.sin(phase * 2 - x * 0.4);
@@ -216,14 +237,16 @@ export function CanvasView({ animated = true, isPlaying }: CanvasViewProps = {})
           const scale = 0.85 + 0.15 * wave;
           for (let y = 0; y < ROWS; y++) {
             const idx = x * ROWS + y;
-            const b = baked[idx];
-            tmpColor.setRGB(b.r * scale, b.g * scale, b.b * scale);
-            mesh.setColorAt(idx, tmpColor);
+            const bOff = idx * 3;
+            const tOff = idx * 4;
+            texData[tOff]     = Math.min(255, (baked[bOff]     * scale) | 0);
+            texData[tOff + 1] = Math.min(255, (baked[bOff + 1] * scale) | 0);
+            texData[tOff + 2] = Math.min(255, (baked[bOff + 2] * scale) | 0);
           }
           anyDirty = true;
         }
-        if (anyDirty && mesh.instanceColor) {
-          mesh.instanceColor.needsUpdate = true;
+        if (anyDirty) {
+          colorTex.needsUpdate = true;
         }
       }
 
@@ -231,10 +254,8 @@ export function CanvasView({ animated = true, isPlaying }: CanvasViewProps = {})
     };
     animate();
 
-    // ─── Mouse controls ──────────────────────────────────────────────
     const removeMouseHandlers = setupMouseHandlers(renderer.domElement, mesh, camera);
 
-    // ─── Resize handler ──────────────────────────────────────────────
     const onResize = () => {
       if (!container) return;
       const nw = container.clientWidth;
@@ -252,6 +273,7 @@ export function CanvasView({ animated = true, isPlaying }: CanvasViewProps = {})
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
+      colorTex.dispose();
       geo.dispose();
       mat.dispose();
       renderer.dispose();

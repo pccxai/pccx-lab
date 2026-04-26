@@ -1,8 +1,15 @@
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import { useTheme } from "./ThemeContext";
+import { useRafScheduler } from "./hooks/useRafScheduler";
+import { useCycleCursor } from "./hooks/useCycleCursor";
 import {
   Database, Search, Eye, ArrowRight, Star,
 } from "lucide-react";
+
+// ─── Precomputed hex lookup (0x00–0xFF) ─────────────────────────────────────
+const HEX_LUT: string[] = Array.from({ length: 256 }, (_, i) =>
+  i.toString(16).toUpperCase().padStart(2, "0"),
+);
 
 // ─── Memory region model (pccx v002 KV260 layout) ────────────────────────────
 
@@ -75,8 +82,15 @@ function generateAccesses(): Access[] {
 
 type AddrRadix = "hex" | "dec";
 
+// ─── Virtualised hex row constants ──────────────────────────────────────────
+const BYTES_PER_ROW = 16;
+const ROW_HEIGHT = 22;         // px — matches padding + line-height
+const OVERSCAN_ROWS = 8;      // extra rows above/below the viewport
+
 export function MemoryDump() {
   const theme = useTheme();
+  const raf = useRafScheduler();
+  const { cycle: currentCycle } = useCycleCursor();
   const [activeRegion, setActiveRegion] = useState<Region>(REGIONS[1]);
   const [cursor, setCursor]           = useState<number>(REGIONS[1].start);
   const [addrRadix, setAddrRadix]     = useState<AddrRadix>("hex");
@@ -88,6 +102,9 @@ export function MemoryDump() {
   ]);
   const [jumpInput, setJumpInput] = useState("");
   const timelineRef = useRef<HTMLCanvasElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(600);
 
   const bytes    = useMemo(() => generateBytes(activeRegion), [activeRegion]);
   const accesses = useMemo(() => generateAccesses(), []);
@@ -109,7 +126,18 @@ export function MemoryDump() {
     return map;
   }, [regionAccesses, bytes.length, activeRegion.start]);
 
-  useEffect(() => {
+  // ─── Canvas timeline: RAF-coalesced redraw ────────────────────────────────
+  // Precompute per-cycle access counts so the draw loop is O(cycMax), not
+  // O(cycMax * regionAccesses.length).
+  const cycleCountMap = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const a of regionAccesses) {
+      map.set(a.cycle, (map.get(a.cycle) ?? 0) + 1);
+    }
+    return map;
+  }, [regionAccesses]);
+
+  const drawTimeline = useCallback(() => {
     const canvas = timelineRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -138,34 +166,53 @@ export function MemoryDump() {
     }
     ctx.globalAlpha = 1;
 
+    // Region access density line — uses precomputed map (O(cycMax))
     ctx.strokeStyle = activeRegion.colour;
     ctx.lineWidth = 1.2;
     ctx.beginPath();
     for (let cyc = 0; cyc <= cycMax; cyc++) {
-      const count = regionAccesses.filter(a => a.cycle === cyc).length;
+      const count = cycleCountMap.get(cyc) ?? 0;
       const x = (cyc / cycMax) * rect.width;
       const y = rect.height - Math.min(rect.height - 2, count * 4);
       if (cyc === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.stroke();
-  }, [accesses, activeRegion, regionAccesses, theme]);
 
-  const renderAddr = (a: number) => {
+    // Cycle cursor marker
+    if (currentCycle >= 0 && currentCycle <= cycMax) {
+      const cx = (currentCycle / cycMax) * rect.width;
+      ctx.strokeStyle = theme.warning;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 2]);
+      ctx.beginPath();
+      ctx.moveTo(cx, 0);
+      ctx.lineTo(cx, rect.height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }, [accesses, activeRegion, cycleCountMap, currentCycle, theme]);
+
+  useEffect(() => {
+    raf.schedule("mem-timeline", drawTimeline);
+  }, [raf, drawTimeline]);
+
+  // ─── Address formatting ───────────────────────────────────────────────────
+  const renderAddr = useCallback((a: number) => {
     if (addrRadix === "hex") return "0x" + a.toString(16).toUpperCase().padStart(8, "0");
     return a.toString(10).padStart(10, " ");
-  };
+  }, [addrRadix]);
 
-  const tryJump = () => {
+  const tryJump = useCallback(() => {
     const trimmed = jumpInput.trim();
     if (!trimmed) return;
     const n = trimmed.toLowerCase().startsWith("0x") ? parseInt(trimmed, 16) : parseInt(trimmed, 10);
     if (!Number.isFinite(n)) return;
     const r = REGIONS.find(rr => n >= rr.start && n < rr.start + rr.size);
     if (r) { setActiveRegion(r); setCursor(n); }
-  };
+  }, [jumpInput]);
 
-  const BYTES_PER_ROW = 16;
-  const N_ROWS  = Math.ceil(bytes.length / BYTES_PER_ROW);
+  // ─── Row data (full set — we slice for virtualisation below) ──────────────
+  const N_ROWS = Math.ceil(bytes.length / BYTES_PER_ROW);
   const rows = useMemo(() => {
     const out: Array<{ offset: number; bs: Uint8Array; heats: Uint16Array }> = [];
     for (let r = 0; r < N_ROWS; r++) {
@@ -179,8 +226,10 @@ export function MemoryDump() {
     return out;
   }, [bytes, byteHeat, N_ROWS]);
 
+  // ─── Search ───────────────────────────────────────────────────────────────
   const search = highlight.trim().toLowerCase();
-  const searchMatches = (row: { bs: Uint8Array }): boolean => {
+
+  const searchMatches = useCallback((row: { bs: Uint8Array }): boolean => {
     if (!search) return false;
     if (/^[0-9a-f]+$/i.test(search) && search.length >= 2 && search.length % 2 === 0) {
       for (let i = 0; i + search.length / 2 <= row.bs.length; i++) {
@@ -196,46 +245,102 @@ export function MemoryDump() {
     }
     const ascii = Array.from(row.bs).map(b => (b >= 0x20 && b < 0x7f) ? String.fromCharCode(b) : ".").join("");
     return ascii.toLowerCase().includes(search);
-  };
+  }, [search]);
 
-  const colourForHeat = (h: number) => {
+  // Precompute match count for the status bar (avoids a second pass during render)
+  const searchMatchCount = useMemo(() => {
+    if (!search) return 0;
+    let count = 0;
+    for (const row of rows) if (searchMatches(row)) count++;
+    return count;
+  }, [search, rows, searchMatches]);
+
+  const colourForHeat = useCallback((h: number) => {
     if (h === 0) return "transparent";
     const alpha = Math.min(0.75, 0.18 + h * 0.12);
     return `rgba(79,193,255,${alpha})`;
-  };
+  }, []);
 
-  const addWatch = () => {
+  // ─── Watches ──────────────────────────────────────────────────────────────
+  const addWatch = useCallback(() => {
     setWatches(w => [
       ...w,
       { id: `w${Date.now()}`, label: `watch_${w.length + 1}`, addr: cursor, width: 4 },
     ]);
-  };
-  const removeWatch = (id: string) => setWatches(w => w.filter(ww => ww.id !== id));
+  }, [cursor]);
 
-  const readWatchValue = (addr: number, width: 1 | 2 | 4 | 8): string => {
+  const removeWatch = useCallback((id: string) => setWatches(w => w.filter(ww => ww.id !== id)), []);
+
+  const updateWatchLabel = useCallback((id: string, label: string) => {
+    setWatches(ws => ws.map(x => x.id === id ? { ...x, label } : x));
+  }, []);
+
+  // Cache generated bytes per region to avoid regenerating on every render
+  const watchBytesCache = useMemo(() => {
+    const cache = new Map<string, Uint8Array>();
+    for (const w of watches) {
+      const region = REGIONS.find(r => w.addr >= r.start && w.addr < r.start + r.size);
+      if (!region) continue;
+      if (!cache.has(region.id)) cache.set(region.id, generateBytes(region));
+    }
+    return cache;
+  }, [watches]);
+
+  const readWatchValue = useCallback((addr: number, width: 1 | 2 | 4 | 8): string => {
     const region = REGIONS.find(r => addr >= r.start && addr < r.start + r.size);
     if (!region) return "—";
     const off = addr - region.start;
-    const buf = generateBytes(region);
-    if (off + width > buf.length) return "—";
+    const buf = watchBytesCache.get(region.id);
+    if (!buf || off + width > buf.length) return "—";
     let v = 0n;
     for (let i = 0; i < width; i++) v |= BigInt(buf[off + i]) << BigInt(i * 8);
     return "0x" + v.toString(16).toUpperCase().padStart(width * 2, "0");
-  };
+  }, [watchBytesCache]);
+
+  // ─── Virtual scroll ───────────────────────────────────────────────────────
+  const totalHeight = N_ROWS * ROW_HEIGHT;
+
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    raf.schedule("mem-scroll", () => {
+      setScrollTop(el.scrollTop);
+      setViewportH(el.clientHeight);
+    });
+  }, [raf]);
+
+  // Measure viewport on mount and resize
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setViewportH(el.clientHeight);
+    const ro = new ResizeObserver(() => {
+      setViewportH(el.clientHeight);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Sticky header height (approx)
+  const HEADER_H = 26;
+  const startRow = Math.max(0, Math.floor((scrollTop - HEADER_H) / ROW_HEIGHT) - OVERSCAN_ROWS);
+  const endRow = Math.min(N_ROWS, Math.ceil((scrollTop + viewportH) / ROW_HEIGHT) + OVERSCAN_ROWS);
+  const visibleRows = rows.slice(startRow, endRow);
+  const offsetY = startRow * ROW_HEIGHT;
 
   return (
     <main role="main" aria-label="Memory dump" className="w-full h-full flex flex-col overflow-hidden" style={{ background: theme.bg }}>
       <div role="toolbar" aria-label="Memory dump toolbar" className="flex items-center px-3 shrink-0 gap-3"
-           style={{ height: 44, borderBottom: `1px solid ${theme.border}`, background: theme.bgEditor }}>
+           style={{ height: 44, borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bgEditor }}>
         <Database size={15} style={{ color: theme.accent }} />
         <span style={{ fontWeight: 700, fontSize: 13 }}>Memory Dump</span>
         <span style={{ fontSize: 10, color: theme.textMuted }}>
-          {activeRegion.label} · {bytes.length.toLocaleString()} B loaded
+          {activeRegion.label} · {bytes.length.toLocaleString()} B loaded · cycle {currentCycle}
         </span>
 
         <div className="flex-1" />
 
-        <div style={{ display: "inline-flex", gap: 2, background: theme.bgSurface, border: `1px solid ${theme.border}`, borderRadius: 4, padding: 2 }}>
+        <div style={{ display: "inline-flex", gap: 2, background: theme.bgSurface, border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 4, padding: 2 }}>
           {(["hex", "dec"] as AddrRadix[]).map(r => (
             <button
               key={r}
@@ -250,7 +355,7 @@ export function MemoryDump() {
           ))}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 4, background: theme.bgSurface, border: `1px solid ${theme.border}`, borderRadius: 4, padding: "3px 6px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, background: theme.bgSurface, border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 4, padding: "3px 6px" }}>
           <ArrowRight size={11} style={{ color: theme.textMuted }} />
           <input
             value={jumpInput}
@@ -260,7 +365,7 @@ export function MemoryDump() {
             style={{
               width: 130, fontSize: 11, padding: "1px 2px",
               background: "transparent", border: "none", outline: "none",
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              fontFamily: theme.fontMono,
               color: theme.text,
             }}
           />
@@ -270,7 +375,7 @@ export function MemoryDump() {
           }}>Go</button>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 4, background: theme.bgSurface, border: `1px solid ${theme.border}`, borderRadius: 4, padding: "3px 6px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, background: theme.bgSurface, border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 4, padding: "3px 6px" }}>
           <Search size={11} style={{ color: theme.textMuted }} />
           <input
             value={highlight}
@@ -279,14 +384,14 @@ export function MemoryDump() {
             style={{
               width: 160, fontSize: 11, padding: "1px 2px",
               background: "transparent", border: "none", outline: "none",
-              color: theme.text, fontFamily: "ui-monospace, monospace",
+              color: theme.text, fontFamily: theme.fontMono,
             }}
           />
         </div>
       </div>
 
       <div style={{
-        height: 40, padding: "4px 12px", borderBottom: `1px solid ${theme.border}`,
+        height: 40, padding: "4px 12px", borderBottom: `0.5px solid ${theme.borderSubtle}`,
         background: theme.bgPanel, display: "flex", flexDirection: "column", gap: 2,
       }}>
         <span style={{ fontSize: 9, color: theme.textMuted, letterSpacing: 0.5 }}>
@@ -296,7 +401,7 @@ export function MemoryDump() {
       </div>
 
       <div className="flex-1 flex overflow-hidden min-h-0">
-        <div style={{ width: 230, borderRight: `1px solid ${theme.border}`, background: theme.bgPanel, display: "flex", flexDirection: "column" }}>
+        <div style={{ width: 230, borderRight: `0.5px solid ${theme.borderSubtle}`, background: theme.bgPanel, display: "flex", flexDirection: "column" }}>
           <div style={{ padding: "8px 12px 4px", fontSize: 10, color: theme.textMuted, letterSpacing: 0.6, textTransform: "uppercase" }}>
             Regions
           </div>
@@ -311,7 +416,7 @@ export function MemoryDump() {
                     display: "flex", flexDirection: "column", gap: 2,
                     padding: "6px 9px", textAlign: "left",
                     background: active ? theme.accentBg : "transparent",
-                    border: `1px solid ${active ? theme.accent : theme.borderDim}`,
+                    border: `0.5px solid ${active ? theme.accent : theme.borderSubtle}`,
                     borderRadius: 4, cursor: "pointer", color: theme.text,
                   }}
                 >
@@ -319,7 +424,7 @@ export function MemoryDump() {
                     <span style={{ width: 8, height: 8, borderRadius: 2, background: r.colour }} />
                     {r.label}
                   </div>
-                  <div style={{ fontSize: 9, color: theme.textMuted, fontFamily: "ui-monospace, monospace" }}>
+                  <div style={{ fontSize: 9, color: theme.textMuted, fontFamily: theme.fontMono }}>
                     {renderAddr(r.start)} · {(r.size / 1024).toLocaleString()} KB
                   </div>
                   {r.note && <div style={{ fontSize: 9, color: theme.textFaint }}>{r.note}</div>}
@@ -335,21 +440,21 @@ export function MemoryDump() {
             <button aria-label="Pin current cursor as watch" onClick={addWatch} title="Add current cursor as watch" style={{
               fontSize: 9, padding: "1px 7px", borderRadius: 3,
               background: "transparent", color: theme.accent,
-              border: `1px solid ${theme.accent}`, cursor: "pointer",
+              border: `0.5px solid ${theme.accent}`, cursor: "pointer",
             }}>+ pin</button>
           </div>
           <div style={{ padding: "0 8px 12px", display: "flex", flexDirection: "column", gap: 3, overflowY: "auto" }}>
             {watches.map(w => (
               <div key={w.id} style={{
                 padding: "6px 9px", background: theme.bgSurface,
-                border: `1px solid ${theme.borderDim}`, borderRadius: 4,
+                border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 4,
                 display: "flex", flexDirection: "column", gap: 2,
               }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   <Star size={10} style={{ color: theme.warning }} />
                   <input
                     value={w.label}
-                    onChange={e => setWatches(ws => ws.map(x => x.id === w.id ? { ...x, label: e.target.value } : x))}
+                    onChange={e => updateWatchLabel(w.id, e.target.value)}
                     style={{
                       flex: 1, fontSize: 11, background: "transparent",
                       color: theme.text, border: "none", outline: "none", fontWeight: 600,
@@ -360,10 +465,10 @@ export function MemoryDump() {
                     color: theme.textFaint, cursor: "pointer", padding: 0,
                   }}>X</button>
                 </div>
-                <div style={{ fontSize: 10, color: theme.textMuted, fontFamily: "ui-monospace, monospace" }}>
+                <div style={{ fontSize: 10, color: theme.textMuted, fontFamily: theme.fontMono }}>
                   {renderAddr(w.addr)} · {w.width} B
                 </div>
-                <div style={{ fontSize: 11, color: theme.accent, fontFamily: "ui-monospace, monospace", fontWeight: 600 }}>
+                <div style={{ fontSize: 11, color: theme.accent, fontFamily: theme.fontMono, fontWeight: 600 }}>
                   = {readWatchValue(w.addr, w.width)}
                 </div>
               </div>
@@ -376,10 +481,15 @@ export function MemoryDump() {
           </div>
         </div>
 
-        <div style={{ flex: 1, overflow: "auto", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 11 }}>
+        {/* Virtualised hex grid */}
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          style={{ flex: 1, overflow: "auto", fontFamily: theme.fontMono, fontSize: 11 }}
+        >
           <div style={{
             position: "sticky", top: 0, zIndex: 1,
-            background: theme.bgEditor, borderBottom: `1px solid ${theme.border}`,
+            background: theme.bgEditor, borderBottom: `0.5px solid ${theme.borderSubtle}`,
             display: "grid",
             gridTemplateColumns: "140px repeat(16, 24px) 24px minmax(160px, 1fr)",
             padding: "4px 12px",
@@ -388,85 +498,94 @@ export function MemoryDump() {
             <span>OFFSET</span>
             {Array.from({ length: 16 }, (_, i) => (
               <span key={i} style={{ textAlign: "center" }}>
-                {i.toString(16).toUpperCase().padStart(2, "0")}
+                {HEX_LUT[i]}
               </span>
             ))}
             <span />
             <span style={{ paddingLeft: 6 }}>ASCII</span>
           </div>
 
-          {rows.map((row, ri) => {
-            const addr = activeRegion.start + row.offset;
-            const inCursorRow = cursor >= addr && cursor < addr + BYTES_PER_ROW;
-            const rowMatches  = searchMatches(row);
-            return (
-              <div
-                key={ri}
-                onClick={() => setCursor(addr)}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "140px repeat(16, 24px) 24px minmax(160px, 1fr)",
-                  padding: "2px 12px",
-                  background: inCursorRow ? theme.accentBg : rowMatches ? "rgba(229,164,0,0.10)" : "transparent",
-                  borderBottom: `1px solid ${theme.borderDim}`,
-                  cursor: "pointer",
-                }}
-              >
-                <span style={{ color: inCursorRow ? theme.accent : theme.textMuted }}>
-                  {renderAddr(addr)}
-                </span>
-                {Array.from({ length: 16 }, (_, i) => {
-                  const b = row.bs[i] ?? 0;
-                  const heat = row.heats[i] ?? 0;
-                  const off = row.offset + i;
-                  const byteAddr = activeRegion.start + off;
-                  const isCursor = byteAddr === cursor;
-                  return (
-                    <span
-                      key={i}
-                      onClick={(e) => { e.stopPropagation(); setCursor(byteAddr); }}
-                      style={{
-                        textAlign: "center",
-                        color: heat > 0 ? theme.text : theme.textDim,
-                        background: isCursor
-                          ? theme.accent
-                          : colourForHeat(heat),
-                        borderRadius: 2,
-                        cursor: "pointer",
-                        fontWeight: isCursor ? 700 : 400,
-                      }}
-                    >
-                      {i < row.bs.length ? b.toString(16).toUpperCase().padStart(2, "0") : "  "}
+          {/* Scroll spacer — sets the total scrollable height */}
+          <div style={{ height: totalHeight, position: "relative" }}>
+            {/* Visible window positioned via translateY */}
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${offsetY}px)` }}>
+              {visibleRows.map((row, vi) => {
+                const ri = startRow + vi;
+                const addr = activeRegion.start + row.offset;
+                const inCursorRow = cursor >= addr && cursor < addr + BYTES_PER_ROW;
+                const rowMatches  = searchMatches(row);
+                return (
+                  <div
+                    key={ri}
+                    onClick={() => setCursor(addr)}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "140px repeat(16, 24px) 24px minmax(160px, 1fr)",
+                      padding: "2px 12px",
+                      height: ROW_HEIGHT,
+                      boxSizing: "border-box",
+                      background: inCursorRow ? theme.accentBg : rowMatches ? "rgba(229,164,0,0.10)" : "transparent",
+                      borderBottom: `0.5px solid ${theme.borderSubtle}`,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ color: inCursorRow ? theme.accent : theme.textMuted }}>
+                      {renderAddr(addr)}
                     </span>
-                  );
-                })}
-                <span />
-                <span style={{ paddingLeft: 6, color: theme.text, letterSpacing: 1.5 }}>
-                  {Array.from(row.bs).map(b => (b >= 0x20 && b < 0x7f) ? String.fromCharCode(b) : "·").join("")}
-                </span>
-              </div>
-            );
-          })}
+                    {Array.from({ length: 16 }, (_, i) => {
+                      const b = row.bs[i] ?? 0;
+                      const heat = row.heats[i] ?? 0;
+                      const off = row.offset + i;
+                      const byteAddr = activeRegion.start + off;
+                      const isCursor = byteAddr === cursor;
+                      return (
+                        <span
+                          key={i}
+                          onClick={(e) => { e.stopPropagation(); setCursor(byteAddr); }}
+                          style={{
+                            textAlign: "center",
+                            color: heat > 0 ? theme.text : theme.textDim,
+                            background: isCursor
+                              ? theme.accent
+                              : colourForHeat(heat),
+                            borderRadius: 2,
+                            cursor: "pointer",
+                            fontWeight: isCursor ? 700 : 400,
+                          }}
+                        >
+                          {i < row.bs.length ? HEX_LUT[b] : "  "}
+                        </span>
+                      );
+                    })}
+                    <span />
+                    <span style={{ paddingLeft: 6, color: theme.text, letterSpacing: 1.5 }}>
+                      {Array.from(row.bs).map(b => (b >= 0x20 && b < 0x7f) ? String.fromCharCode(b) : "·").join("")}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="flex items-center px-3 shrink-0 gap-3"
-           style={{ height: 28, borderTop: `1px solid ${theme.border}`, background: theme.bgPanel, fontSize: 10 }}>
+           style={{ height: 28, borderTop: `0.5px solid ${theme.borderSubtle}`, background: theme.bgPanel, fontSize: 10 }}>
         <Eye size={11} style={{ color: theme.accent }} />
         <span style={{ color: theme.textMuted }}>Cursor:</span>
-        <span style={{ color: theme.accent, fontFamily: "ui-monospace, monospace", fontWeight: 700 }}>
+        <span style={{ color: theme.accent, fontFamily: theme.fontMono, fontWeight: 700 }}>
           {renderAddr(cursor)}
         </span>
         <span style={{ color: theme.textMuted }}>region</span>
         <span style={{ color: activeRegion.colour, fontWeight: 600 }}>{activeRegion.label}</span>
         <span style={{ color: theme.textMuted }}>offset</span>
-        <span style={{ color: theme.text, fontFamily: "ui-monospace, monospace" }}>
+        <span style={{ color: theme.text, fontFamily: theme.fontMono }}>
           0x{(cursor - activeRegion.start).toString(16).toUpperCase().padStart(6, "0")}
         </span>
         <div className="flex-1" />
         <span style={{ color: theme.textMuted }}>
           {regionAccesses.length} access{regionAccesses.length === 1 ? "" : "es"} hit this region
-          {highlight && search && ` · ${rows.filter(searchMatches).length} rows match '${highlight}'`}
+          {highlight && search && ` · ${searchMatchCount} rows match '${highlight}'`}
         </span>
       </div>
     </main>

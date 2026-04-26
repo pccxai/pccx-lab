@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTheme } from "./ThemeContext";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { TerminalSquare, ShieldCheck, Bug, Activity, Cpu } from "lucide-react";
 import { SynthStatusCard } from "./SynthStatusCard";
 import { VerificationRunner } from "./VerificationRunner";
@@ -90,7 +91,7 @@ export function VerificationSuite() {
         <ShieldCheck size={18} className="mr-2" style={{ color: theme.accent }} />
         <span style={{ fontWeight: 600, fontSize: 13, marginRight: 24 }}>Verification Suite</span>
         
-        <div className="flex rounded p-1 gap-1" style={{ border: `1px solid ${theme.border}`, background: theme.bg }}>
+        <div className="flex rounded p-1 gap-1" style={{ border: `0.5px solid ${theme.borderSubtle}`, background: theme.bg }}>
           {[
             { id: "isa",   label: "ISA Dashboard", icon: <TerminalSquare size={14} /> },
             { id: "api",   label: "API Integrity", icon: <Activity size={14} />       },
@@ -124,7 +125,7 @@ export function VerificationSuite() {
               width: 360,
               background: theme.bg,
               color: theme.text,
-              border: `1px solid ${theme.border}`,
+              border: `0.5px solid ${theme.borderSubtle}`,
             }}
           />
         )}
@@ -159,34 +160,7 @@ export function VerificationSuite() {
                   </div>
                 )}
                 {!isaErr && isaRows && isaRows.length > 0 && (
-                  <table className="w-full text-left" style={{ fontSize: 11, borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ background: theme.bgSurface, borderBottom: `1px solid ${theme.border}`, color: theme.textDim }}>
-                        <th className="p-2">MNEMONIC</th>
-                        <th className="p-2">OPCODE</th>
-                        <th className="p-2">DECODE</th>
-                        <th className="p-2 text-right">EXP CYCLES</th>
-                        <th className="p-2 text-right">ACT CYCLES</th>
-                        <th className="p-2 text-center">STATUS</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {isaRows.map((row, i) => (
-                        <tr key={i} style={{ borderBottom: `1px solid ${theme.borderDim}` }} >
-                          <td className="p-2 font-mono" style={{ color: theme.accent }}>{row.inst}</td>
-                          <td className="p-2 font-mono" style={{ color: theme.textMuted }}>{row.opcode}</td>
-                          <td className="p-2">{row.decode}</td>
-                          <td className="p-2 text-right">{row.expected_cycles}</td>
-                          <td className="p-2 text-right font-bold" style={{ color: row.expected_cycles !== row.actual_cycles ? theme.error : theme.text }}>{row.actual_cycles}</td>
-                          <td className="p-2 text-center">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: `${getStatusColor(row.status)}22`, color: getStatusColor(row.status), border: `1px solid ${getStatusColor(row.status)}44` }}>
-                               {row.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <IsaVirtualTable rows={isaRows} getStatusColor={getStatusColor} />
                 )}
               </div>
             </div>
@@ -224,19 +198,7 @@ export function VerificationSuite() {
              <span>Run Log</span>
              <button onClick={() => setLog([])} style={{ color: theme.textMuted }} aria-label="Clear run log">Clear</button>
            </div>
-           <div className="flex-1 p-3 overflow-y-auto font-mono text-[10px] flex flex-col gap-1">
-              {log.length === 0 && (
-                <span style={{ color: theme.textFaint }}>
-                  No active runs — use the Synth tab's Run Verification button
-                  or load an ISA commit log to populate this pane.
-                </span>
-              )}
-              {log.map((l, i) => (
-                 <div key={i} style={{ color: l.includes("FAIL") || l.includes("Violat") ? theme.error : theme.textDim }}>
-                   {l}
-                 </div>
-              ))}
-           </div>
+           <RunLogVirtual log={log} />
         </div>
       </div>
     </div>
@@ -283,7 +245,7 @@ function UVMCoveragePanel() {
         <StatCard label="cross tuples" value={`${merged.crosses.length}`} />
       </div>
 
-      <div className="flex rounded p-1 gap-1 self-start" style={{ border: `1px solid ${theme.border}`, background: theme.bg }}>
+      <div className="flex rounded p-1 gap-1 self-start" style={{ border: `0.5px solid ${theme.borderSubtle}`, background: theme.bg }}>
         {(["heatmap", "cross"] as CovSubTab[]).map((id) => (
           <button
             key={id}
@@ -311,7 +273,7 @@ function GroupHeatmap({ groups }: { groups: CovGroup[] }) {
   const theme = useTheme();
   return (
     <div className="rounded border overflow-hidden flex flex-col h-full" style={{ borderColor: theme.border, background: theme.bgPanel }}>
-      <div className="flex items-center justify-between" style={{ padding: "8px 12px", fontSize: 10, fontWeight: 700, color: theme.textMuted, letterSpacing: "0.05em", borderBottom: `1px solid ${theme.border}` }}>
+      <div className="flex items-center justify-between" style={{ padding: "8px 12px", fontSize: 10, fontWeight: 700, color: theme.textMuted, letterSpacing: "0.05em", borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
         <span>COVERPOINT HEATMAP — hits / goal per bin</span>
         <span style={{ color: theme.textDim, fontWeight: 500 }}>goal% turns red &lt; 80</span>
       </div>
@@ -329,11 +291,11 @@ function GroupHeatmap({ groups }: { groups: CovGroup[] }) {
               background: bgColor + "22", border: `1px solid ${bgColor}66`,
               borderRadius: 4, padding: "6px 8px", fontSize: 10,
             }}>
-              <div style={{ fontFamily: "monospace", fontSize: 10, color: theme.text, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</div>
+              <div style={{ fontFamily: theme.fontMono, fontSize: 10, color: theme.text, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</div>
               <div style={{ fontSize: 9, color: theme.textMuted, marginTop: 2 }}>{g.bins.length} bins</div>
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
                 <span style={{ color: bgColor, fontWeight: 700 }}>{covPct.toFixed(0)}%</span>
-                <span style={{ color: theme.textDim, fontFamily: "monospace" }}>{totalHits}/{totalGoal}</span>
+                <span style={{ color: theme.textDim, fontFamily: theme.fontMono }}>{totalHits}/{totalGoal}</span>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 2, marginTop: 4 }}>
                 {g.bins.map((b) => {
@@ -366,7 +328,7 @@ function CrossHeatmap({ crosses }: { crosses: CrossTuple[] }) {
 
   return (
     <div className="rounded border overflow-hidden flex flex-col h-full" style={{ borderColor: theme.border, background: theme.bgPanel }}>
-      <div className="flex items-center justify-between" style={{ padding: "8px 12px", fontSize: 10, fontWeight: 700, color: theme.textMuted, letterSpacing: "0.05em", borderBottom: `1px solid ${theme.border}` }}>
+      <div className="flex items-center justify-between" style={{ padding: "8px 12px", fontSize: 10, fontWeight: 700, color: theme.textMuted, letterSpacing: "0.05em", borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
         <span>CROSS HEATMAP — gemm_k_stride × mem_hp_backpressure (8 × 4)</span>
         <span style={{ color: theme.textDim, fontWeight: 500 }}>goal% &lt; 80 → red</span>
       </div>
@@ -376,14 +338,14 @@ function CrossHeatmap({ crosses }: { crosses: CrossTuple[] }) {
             <tr>
               <th style={{ color: theme.textMuted, padding: "0 6px" }}>stride \ bp</th>
               {bBins.map((b) => (
-                <th key={b} style={{ color: theme.textDim, fontFamily: "monospace", padding: "0 8px" }}>{b}</th>
+                <th key={b} style={{ color: theme.textDim, fontFamily: theme.fontMono, padding: "0 8px" }}>{b}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {aBins.map((a) => (
               <tr key={a}>
-                <td style={{ color: theme.textDim, fontFamily: "monospace", padding: "0 6px" }}>{a}</td>
+                <td style={{ color: theme.textDim, fontFamily: theme.fontMono, padding: "0 6px" }}>{a}</td>
                 {bBins.map((b) => {
                   const c     = cell(a, b);
                   const hits  = c?.hits ?? 0;
@@ -409,7 +371,7 @@ function CrossHeatmap({ crosses }: { crosses: CrossTuple[] }) {
             ))}
           </tbody>
         </table>
-        <div className="mt-3 p-2 rounded" style={{ background: theme.bgSurface, border: `1px solid ${theme.border}`, fontSize: 10, color: theme.textDim }}>
+        <div className="mt-3 p-2 rounded" style={{ background: theme.bgSurface, border: `0.5px solid ${theme.borderSubtle}`, fontSize: 10, color: theme.textDim }}>
           Each cell shows merged hits across run_a + run_b + run_c.
           Hover for (a_bin, b_bin, hits, goal%). Red = &lt; 80% goal.
         </div>
@@ -468,37 +430,184 @@ function APIIntegrityPanel() {
         <StatCard label="dropped events" value={`${totalDrops}`} />
         <StatCard label="samples"        value={`${rows.length}`} />
       </div>
-      <div className="flex-1 overflow-auto rounded border" style={{ borderColor: theme.border, background: theme.bgPanel }}>
-        <table className="w-full" style={{ fontSize: 11, borderCollapse: "collapse", fontFamily: "ui-monospace, monospace" }}>
-          <thead style={{ position: "sticky", top: 0, background: theme.bgSurface }}>
-            <tr style={{ color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>
-              <th style={{ padding: "6px 10px", textAlign: "left" }}>API</th>
-              <th style={{ padding: "6px 10px", textAlign: "left" }}>Kind</th>
-              <th style={{ padding: "6px 10px", textAlign: "right" }}>p99 Latency</th>
-              <th style={{ padding: "6px 10px", textAlign: "right" }}>Drops</th>
-              <th style={{ padding: "6px 10px", textAlign: "left" }}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => {
-              const col = r.status === "OK" ? theme.success : r.status === "WARN" ? theme.warning : theme.error;
-              return (
-                <tr key={i} style={{ borderBottom: `1px solid ${theme.borderDim}`, color: theme.text }}>
-                  <td style={{ padding: "6px 10px", color: theme.accent }}>{r.api}</td>
-                  <td style={{ padding: "6px 10px", color: theme.textDim }}>{r.kind}</td>
-                  <td style={{ padding: "6px 10px", textAlign: "right" }}>{formatLatency(r.p99_latency_ns)}</td>
-                  <td style={{ padding: "6px 10px", textAlign: "right", color: r.drops > 0 ? theme.warning : theme.textDim }}>{r.drops}</td>
-                  <td style={{ padding: "6px 10px" }}>
-                    <span style={{ padding: "1px 8px", border: `1px solid ${col}66`, borderRadius: 3, color: col, fontSize: 10, fontWeight: 700 }}>
-                      {r.status}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <ApiVirtualTable rows={rows} />
+    </div>
+  );
+}
+
+/* ─── Virtualized ISA Table ──────────────────────────────────────────────── */
+
+const ISA_COL_GRID = "minmax(100px,1.2fr) minmax(90px,1fr) minmax(120px,1.5fr) 80px 80px 70px";
+const ISA_ROW_HEIGHT = 32;
+
+function IsaVirtualTable({ rows, getStatusColor }: { rows: IsaResult[]; getStatusColor: (s: string) => string }) {
+  const theme = useTheme();
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ISA_ROW_HEIGHT,
+    overscan: 8,
+  });
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0" style={{ fontSize: 11 }}>
+      {/* Header */}
+      <div style={{
+        display: "grid", gridTemplateColumns: ISA_COL_GRID,
+        background: theme.bgSurface, borderBottom: `0.5px solid ${theme.borderSubtle}`,
+        color: theme.textDim,
+      }}>
+        <div className="p-2">MNEMONIC</div>
+        <div className="p-2">OPCODE</div>
+        <div className="p-2">DECODE</div>
+        <div className="p-2 text-right">EXP CYCLES</div>
+        <div className="p-2 text-right">ACT CYCLES</div>
+        <div className="p-2 text-center">STATUS</div>
       </div>
+      {/* Scrollable body */}
+      <div ref={parentRef} className="flex-1 overflow-auto min-h-0">
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          {virtualizer.getVirtualItems().map((vi) => {
+            const row = rows[vi.index];
+            return (
+              <div
+                key={vi.index}
+                style={{
+                  position: "absolute", top: 0, left: 0, width: "100%",
+                  height: vi.size,
+                  transform: `translateY(${vi.start}px)`,
+                  display: "grid", gridTemplateColumns: ISA_COL_GRID,
+                  borderBottom: `0.5px solid ${theme.borderSubtle}`,
+                  alignItems: "center",
+                }}
+              >
+                <div className="p-2 font-mono" style={{ color: theme.accent, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.inst}</div>
+                <div className="p-2 font-mono" style={{ color: theme.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.opcode}</div>
+                <div className="p-2" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.decode}</div>
+                <div className="p-2 text-right">{row.expected_cycles}</div>
+                <div className="p-2 text-right font-bold" style={{ color: row.expected_cycles !== row.actual_cycles ? theme.error : theme.text }}>{row.actual_cycles}</div>
+                <div className="p-2 text-center">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ background: `${getStatusColor(row.status)}22`, color: getStatusColor(row.status), border: `1px solid ${getStatusColor(row.status)}44` }}>
+                    {row.status}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Virtualized API Table ──────────────────────────────────────────────── */
+
+const API_COL_GRID = "minmax(120px,1.5fr) minmax(80px,1fr) 100px 60px 70px";
+const API_ROW_HEIGHT = 34;
+
+function ApiVirtualTable({ rows }: { rows: ApiCall[] }) {
+  const theme = useTheme();
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => API_ROW_HEIGHT,
+    overscan: 8,
+  });
+
+  return (
+    <div className="flex-1 rounded border overflow-hidden flex flex-col min-h-0" style={{ borderColor: theme.border, background: theme.bgPanel, fontFamily: "ui-monospace, monospace", fontSize: 11 }}>
+      {/* Header */}
+      <div style={{
+        display: "grid", gridTemplateColumns: API_COL_GRID,
+        background: theme.bgSurface, color: theme.textMuted,
+        borderBottom: `0.5px solid ${theme.borderSubtle}`,
+      }}>
+        <div style={{ padding: "6px 10px", textAlign: "left" }}>API</div>
+        <div style={{ padding: "6px 10px", textAlign: "left" }}>Kind</div>
+        <div style={{ padding: "6px 10px", textAlign: "right" }}>p99 Latency</div>
+        <div style={{ padding: "6px 10px", textAlign: "right" }}>Drops</div>
+        <div style={{ padding: "6px 10px", textAlign: "left" }}>Status</div>
+      </div>
+      {/* Scrollable body */}
+      <div ref={parentRef} className="flex-1 overflow-auto min-h-0">
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          {virtualizer.getVirtualItems().map((vi) => {
+            const r = rows[vi.index];
+            const col = r.status === "OK" ? theme.success : r.status === "WARN" ? theme.warning : theme.error;
+            return (
+              <div
+                key={vi.index}
+                style={{
+                  position: "absolute", top: 0, left: 0, width: "100%",
+                  height: vi.size,
+                  transform: `translateY(${vi.start}px)`,
+                  display: "grid", gridTemplateColumns: API_COL_GRID,
+                  borderBottom: `0.5px solid ${theme.borderSubtle}`,
+                  color: theme.text, alignItems: "center",
+                }}
+              >
+                <div style={{ padding: "6px 10px", color: theme.accent }}>{r.api}</div>
+                <div style={{ padding: "6px 10px", color: theme.textDim }}>{r.kind}</div>
+                <div style={{ padding: "6px 10px", textAlign: "right" }}>{formatLatency(r.p99_latency_ns)}</div>
+                <div style={{ padding: "6px 10px", textAlign: "right", color: r.drops > 0 ? theme.warning : theme.textDim }}>{r.drops}</div>
+                <div style={{ padding: "6px 10px" }}>
+                  <span style={{ padding: "1px 8px", border: `1px solid ${col}66`, borderRadius: 3, color: col, fontSize: 10, fontWeight: 700 }}>
+                    {r.status}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Virtualized Run Log ────────────────────────────────────────────────── */
+
+const LOG_LINE_HEIGHT = 18;
+
+function RunLogVirtual({ log }: { log: string[] }) {
+  const theme = useTheme();
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: log.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => LOG_LINE_HEIGHT,
+    overscan: 10,
+  });
+
+  return (
+    <div ref={parentRef} className="flex-1 p-3 overflow-y-auto font-mono text-[10px]">
+      {log.length === 0 && (
+        <span style={{ color: theme.textFaint }}>
+          No active runs — use the Synth tab's Run Verification button
+          or load an ISA commit log to populate this pane.
+        </span>
+      )}
+      {log.length > 0 && (
+        <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+          {virtualizer.getVirtualItems().map((vi) => {
+            const l = log[vi.index];
+            return (
+              <div
+                key={vi.index}
+                style={{
+                  position: "absolute", top: 0, left: 0, width: "100%",
+                  height: vi.size,
+                  transform: `translateY(${vi.start}px)`,
+                  color: l.includes("FAIL") || l.includes("Violat") ? theme.error : theme.textDim,
+                }}
+              >
+                {l}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -507,7 +616,7 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone?:
   const theme = useTheme();
   const col = tone === "ok" ? theme.success : tone === "warn" ? theme.warning : tone === "bad" ? theme.error : theme.text;
   return (
-    <div style={{ padding: "10px 12px", background: theme.bgPanel, borderRadius: 6, border: `1px solid ${theme.border}` }}>
+    <div style={{ padding: "10px 12px", background: theme.bgPanel, borderRadius: 6, border: `0.5px solid ${theme.borderSubtle}` }}>
       <div style={{ fontSize: 9, color: theme.textMuted, letterSpacing: "0.05em", textTransform: "uppercase" }}>{label}</div>
       <div style={{ fontSize: 18, fontWeight: 700, color: col, marginTop: 4, fontFamily: "ui-monospace, monospace" }}>{value}</div>
     </div>

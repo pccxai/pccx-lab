@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo, memo } from "react";
 import { useTheme } from "./ThemeContext";
 import { TrendingUp, CheckCircle2, AlertTriangle } from "lucide-react";
 
@@ -33,17 +33,15 @@ function tauriInvoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> 
   return bridge(cmd, args);
 }
 
-/**
- * A compact card that re-runs `analyze_roofline` whenever a new trace is
- * loaded and surfaces the arithmetic-intensity / compute-vs-memory
- * classification. Designed to sit alongside SynthStatusCard in the
- * Verification -> Synth Status tab.
- */
-export function RooflineCard() {
+const formatNumber = (v: number, digits = 2) =>
+  Number.isFinite(v) ? v.toFixed(digits) : "∞";
+
+/** Compact roofline classification card for the dashboard. */
+export const RooflineCard = memo(function RooflineCard() {
   const theme = useTheme();
   const [status, setStatus] = useState<Status>({ kind: "idle" });
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setStatus({ kind: "loading" });
     try {
       const point = await tauriInvoke<RooflinePoint>("analyze_roofline", {});
@@ -51,31 +49,68 @@ export function RooflineCard() {
     } catch (err) {
       setStatus({ kind: "error", message: String(err) });
     }
-  };
+  }, []);
 
   useEffect(() => {
     void load();
-    // React to future trace loads via the native Tauri event bus. The
-    // dynamic import keeps the file happy in the Vite browser preview
-    // where @tauri-apps/api/event still resolves but listen() throws.
     let unlisten: (() => void) | undefined;
     import("@tauri-apps/api/event")
       .then(m => m.listen("trace-loaded", () => { void load(); }))
       .then(fn => { unlisten = fn; })
-      .catch(() => { /* browser preview — no event bus */ });
-    return () => {
-      unlisten?.();
-    };
-  }, []);
+      .catch(() => { /* browser preview */ });
+    return () => { unlisten?.(); };
+  }, [load]);
 
-  const formatNumber = (v: number, digits = 2) =>
-    Number.isFinite(v) ? v.toFixed(digits) : "∞";
+  const cardStyle = useMemo(() => ({
+    background: theme.bgSurface,
+    border: `0.5px solid ${theme.borderSubtle}`,
+    borderRadius: theme.radiusMd,
+    boxShadow: theme.shadowSm,
+    minWidth: 320,
+    transition: `box-shadow 0.2s ${theme.ease}`,
+  }), [theme.bgSurface, theme.borderSubtle, theme.radiusMd, theme.shadowSm, theme.ease]);
+
+  const buttonStyle = useMemo(() => ({
+    background: theme.accentBg,
+    color: theme.accent,
+    border: `0.5px solid ${theme.borderSubtle}`,
+    borderRadius: theme.radiusSm,
+    cursor: status.kind === "loading" ? "wait" as const : "pointer" as const,
+    transition: `background 0.15s ${theme.ease}`,
+  }), [theme.accentBg, theme.accent, theme.borderSubtle, theme.radiusSm, theme.ease, status.kind]);
+
+  const metricCellStyle = useMemo(() => ({
+    background: theme.bg,
+    border: `0.5px solid ${theme.borderSubtle}`,
+    borderRadius: theme.radiusSm,
+  }), [theme.bg, theme.borderSubtle, theme.radiusSm]);
+
+  // Derived display values, recomputed only when the roofline point changes
+  const metrics = useMemo(() => {
+    if (status.kind !== "ok") return null;
+    const p = status.point;
+    return {
+      ai:       formatNumber(p.arithmetic_intensity),
+      achieved: formatNumber(p.achieved_gops),
+      peak:     formatNumber(p.peak_gops, 0),
+      bw:       formatNumber(p.peak_bw_gbps, 1),
+      macCycles: p.mac_cycles.toLocaleString(),
+      dmaBytes:  p.dma_bytes_estimate.toLocaleString(),
+    };
+  }, [status]);
+
+  const boundBannerStyle = useMemo(() => {
+    if (status.kind !== "ok") return {};
+    const isCB = status.point.compute_bound;
+    return {
+      background: isCB ? theme.successBg : theme.warningBg,
+      border: `0.5px solid ${isCB ? theme.success : theme.warning}`,
+      borderRadius: theme.radiusSm,
+    };
+  }, [status, theme.successBg, theme.warningBg, theme.success, theme.warning, theme.radiusSm]);
 
   return (
-    <div
-      className="flex flex-col gap-3 p-4 rounded-md"
-      style={{ background: theme.bgSurface, border: `1px solid ${theme.border}`, minWidth: 320 }}
-    >
+    <div className="flex flex-col gap-3 p-4" style={cardStyle}>
       <div className="flex items-center gap-2">
         <TrendingUp size={16} style={{ color: theme.accent }} />
         <span style={{ fontWeight: 600, fontSize: 13 }}>Roofline Analysis</span>
@@ -83,13 +118,8 @@ export function RooflineCard() {
           <button
             onClick={load}
             disabled={status.kind === "loading"}
-            className="px-2 py-0.5 text-[11px] rounded"
-            style={{
-              background: theme.accentBg,
-              color: theme.accent,
-              border: `1px solid ${theme.border}`,
-              cursor: status.kind === "loading" ? "wait" : "pointer",
-            }}
+            className="px-2 py-0.5 text-[11px]"
+            style={buttonStyle}
           >
             {status.kind === "loading" ? "Analysing…" : "Reload"}
           </button>
@@ -113,56 +143,36 @@ export function RooflineCard() {
         </div>
       )}
 
-      {status.kind === "ok" && (
+      {status.kind === "ok" && metrics && (
         <>
           <div className="grid grid-cols-2 gap-2">
-            <div
-              className="flex flex-col gap-0.5 px-3 py-2 rounded"
-              style={{ background: theme.bg, border: `1px solid ${theme.border}` }}
-            >
+            <div className="flex flex-col gap-0.5 px-3 py-2" style={metricCellStyle}>
               <span style={{ fontSize: 10, color: theme.textMuted }}>AI (ops/byte)</span>
               <span style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>
-                {formatNumber(status.point.arithmetic_intensity)}
+                {metrics.ai}
               </span>
             </div>
-            <div
-              className="flex flex-col gap-0.5 px-3 py-2 rounded"
-              style={{ background: theme.bg, border: `1px solid ${theme.border}` }}
-            >
+            <div className="flex flex-col gap-0.5 px-3 py-2" style={metricCellStyle}>
               <span style={{ fontSize: 10, color: theme.textMuted }}>Achieved (GOPS)</span>
               <span style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>
-                {formatNumber(status.point.achieved_gops)}
+                {metrics.achieved}
               </span>
             </div>
-            <div
-              className="flex flex-col gap-0.5 px-3 py-2 rounded"
-              style={{ background: theme.bg, border: `1px solid ${theme.border}` }}
-            >
+            <div className="flex flex-col gap-0.5 px-3 py-2" style={metricCellStyle}>
               <span style={{ fontSize: 10, color: theme.textMuted }}>Peak compute (GOPS)</span>
               <span style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>
-                {formatNumber(status.point.peak_gops, 0)}
+                {metrics.peak}
               </span>
             </div>
-            <div
-              className="flex flex-col gap-0.5 px-3 py-2 rounded"
-              style={{ background: theme.bg, border: `1px solid ${theme.border}` }}
-            >
+            <div className="flex flex-col gap-0.5 px-3 py-2" style={metricCellStyle}>
               <span style={{ fontSize: 10, color: theme.textMuted }}>Peak BW (GB/s)</span>
               <span style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>
-                {formatNumber(status.point.peak_bw_gbps, 1)}
+                {metrics.bw}
               </span>
             </div>
           </div>
 
-          <div
-            className="flex items-center gap-2 px-3 py-2 rounded"
-            style={{
-              background: status.point.compute_bound
-                ? "rgba(78,200,107,0.10)"
-                : "rgba(229,164,0,0.12)",
-              border: `1px solid ${status.point.compute_bound ? theme.success : theme.warning}`,
-            }}
-          >
+          <div className="flex items-center gap-2 px-3 py-2" style={boundBannerStyle}>
             {status.point.compute_bound ? (
               <CheckCircle2 size={14} style={{ color: theme.success }} />
             ) : (
@@ -172,12 +182,11 @@ export function RooflineCard() {
               {status.point.compute_bound ? "Compute-bound" : "Memory-bound"}
             </span>
             <span className="ml-auto" style={{ fontSize: 11, color: theme.textMuted }}>
-              {status.point.mac_cycles.toLocaleString()} MAC cycles ·
-              {" "}{status.point.dma_bytes_estimate.toLocaleString()} B DMA
+              {metrics.macCycles} MAC cycles · {metrics.dmaBytes} B DMA
             </span>
           </div>
         </>
       )}
     </div>
   );
-}
+});

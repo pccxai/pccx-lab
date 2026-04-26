@@ -265,7 +265,7 @@ export function TestbenchAuthor() {
 
   return (
     <div className="w-full h-full flex flex-col overflow-hidden" style={{ background: theme.bg }}>
-      <div className="flex items-center px-4 shrink-0" style={{ height: 40, borderBottom: `1px solid ${theme.border}` }}>
+      <div className="flex items-center px-4 shrink-0" style={{ height: 40, borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
         <Terminal size={16} style={{ color: theme.accent, marginRight: 8 }} />
         <span style={{ fontWeight: 700, fontSize: 13 }}>Testbench Author</span>
         <span style={{ marginLeft: 10, fontSize: 11, color: theme.textMuted }}>
@@ -280,7 +280,7 @@ export function TestbenchAuthor() {
         </button>
       </div>
 
-      <div className="flex items-center shrink-0" style={{ borderBottom: `1px solid ${theme.border}`, padding: "0 12px" }}>
+      <div className="flex items-center shrink-0" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}`, padding: "0 12px" }}>
         {tabBtn("builder", <Blocks size={11}/>, "Builder", "Drag-drop opcode blocks — GUI-first authoring")}
         {tabBtn("isa", <Binary size={11}/>,  "ISA",     "Cycle-authoritative opcode list (editable)")}
         {tabBtn("api", <Code2 size={11}/>,   "API",     "C driver call sequence (generated from ISA)")}
@@ -294,8 +294,8 @@ export function TestbenchAuthor() {
       {active === "builder" ? (
         <div className="flex-1 flex overflow-hidden">
           {/* Palette */}
-          <div className="shrink-0 flex flex-col overflow-y-auto" style={{ width: 180, borderRight: `1px solid ${theme.border}`, background: theme.bgEditor }}>
-            <div style={{ padding: "8px 12px", fontSize: 9, color: theme.textMuted, letterSpacing: "0.05em", borderBottom: `1px solid ${theme.border}`, background: theme.bgPanel }}>
+          <div className="shrink-0 flex flex-col overflow-y-auto" style={{ width: 180, borderRight: `0.5px solid ${theme.borderSubtle}`, background: theme.bgEditor }}>
+            <div style={{ padding: "8px 12px", fontSize: 9, color: theme.textMuted, letterSpacing: "0.05em", borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bgPanel }}>
               OPCODE PALETTE
             </div>
             <div className="p-2 flex flex-col gap-1.5">
@@ -306,7 +306,7 @@ export function TestbenchAuthor() {
                     style={{
                       padding: "8px 10px", fontSize: 11, fontWeight: 600,
                       background: meta.color + "15", color: meta.color,
-                      border: `1px solid ${meta.color}44`, borderRadius: 4,
+                      border: `0.5px solid ${meta.color}44`, borderRadius: 4,
                       textAlign: "left", cursor: "pointer",
                       display: "flex", alignItems: "center", gap: 8,
                     }}>
@@ -317,7 +317,7 @@ export function TestbenchAuthor() {
               })}
             </div>
             <div className="flex-1"/>
-            <div style={{ padding: "8px 12px", fontSize: 9, color: theme.textMuted, borderTop: `1px solid ${theme.border}` }}>
+            <div style={{ padding: "8px 12px", fontSize: 9, color: theme.textMuted, borderTop: `0.5px solid ${theme.borderSubtle}` }}>
               Click a palette entry to append; drag a block's handle to reorder.
             </div>
           </div>
@@ -336,7 +336,7 @@ export function TestbenchAuthor() {
                   onDragEnd={() => setDragIdx(null)}
                   style={{
                     background: theme.bgPanel,
-                    border: `1px solid ${isDragging ? theme.accent : meta.color + "44"}`,
+                    border: `0.5px solid ${isDragging ? theme.accent : meta.color + "44"}`,
                     borderLeft: `4px solid ${meta.color}`,
                     borderRadius: 5,
                     padding: "10px 12px",
@@ -352,8 +352,8 @@ export function TestbenchAuthor() {
                   <select value={b.opcode} onChange={e => updateBlock(i, { opcode: e.target.value as IsaInstr["opcode"], body: OPCODE_META[e.target.value as IsaInstr["opcode"]].template })}
                     style={{
                       fontSize: 11, fontWeight: 700, color: meta.color,
-                      background: meta.color + "15", border: `1px solid ${meta.color}44`,
-                      borderRadius: 3, padding: "3px 6px", fontFamily: "ui-monospace, monospace",
+                      background: meta.color + "15", border: `0.5px solid ${meta.color}44`,
+                      borderRadius: 3, padding: "3px 6px", fontFamily: theme.fontMono,
                       outline: "none", cursor: "pointer",
                     }}>
                     {(Object.keys(OPCODE_META) as IsaInstr["opcode"][]).map(op => (
@@ -365,8 +365,8 @@ export function TestbenchAuthor() {
                     onChange={e => updateBlock(i, { body: e.target.value })}
                     placeholder={meta.template}
                     style={{
-                      fontSize: 11, fontFamily: "ui-monospace, monospace",
-                      background: theme.bgInput, border: `1px solid ${theme.border}`,
+                      fontSize: 11, fontFamily: theme.fontMono,
+                      background: theme.bgInput, border: `0.5px solid ${theme.borderSubtle}`,
                       color: theme.text, borderRadius: 3, padding: "4px 8px", outline: "none",
                     }}/>
                   <input
@@ -402,7 +402,7 @@ export function TestbenchAuthor() {
           spellCheck={false}
           style={{
             flex: 1, padding: "12px 16px",
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontFamily: theme.fontMono,
             fontSize: 12, lineHeight: 1.55,
             color: theme.text, background: theme.bg,
             border: "none", outline: "none", resize: "none",
@@ -412,7 +412,7 @@ export function TestbenchAuthor() {
       )}
 
       <div className="px-4 py-2 shrink-0" style={{
-        borderTop: `1px solid ${theme.border}`, background: theme.bgPanel,
+        borderTop: `0.5px solid ${theme.borderSubtle}`, background: theme.bgPanel,
         fontSize: 10, color: theme.textMuted,
       }}>
         Tip — the ISA view is the authoring source. Edit, then switch to
@@ -431,6 +431,6 @@ function iconBtn(theme: ReturnType<typeof useTheme>) {
     display: "inline-flex" as const, alignItems: "center" as const, gap: 4,
     fontSize: 10, padding: "4px 10px",
     color: theme.textMuted, background: "transparent",
-    border: `1px solid ${theme.border}`, borderRadius: 3, cursor: "pointer" as const,
+    border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 3, cursor: "pointer" as const,
   };
 }

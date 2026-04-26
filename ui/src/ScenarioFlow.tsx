@@ -1,9 +1,11 @@
-import { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { useTheme } from "./ThemeContext";
 import { useI18n } from "./i18n";
 import {
   ChevronRight, Cpu, Activity, Zap, Clock, Database, ArrowRight, Code2,
 } from "lucide-react";
+
+type ReactLike = ReturnType<typeof Code2>;
 
 // ─── Data model ──────────────────────────────────────────────────────────────
 
@@ -269,14 +271,13 @@ const SCENARIO: Stage = {
 // ─── Latency → colour legend (blue = fast, yellow = medium, orange = slow,
 //                              red = critical). Matches the request. ──────────
 
-function latencyColours(lat: LatencyClass) {
-  switch (lat) {
-    case "fast":     return { border: "#3b82f6", tint: "rgba(59,130,246,0.12)",  label: "fast"     };
-    case "medium":   return { border: "#eab308", tint: "rgba(234,179,8,0.12)",   label: "medium"   };
-    case "slow":     return { border: "#f97316", tint: "rgba(249,115,22,0.12)",  label: "slow"     };
-    case "critical": return { border: "#ef4444", tint: "rgba(239,68,68,0.15)",   label: "critical" };
-  }
-}
+const LATENCY_COLOURS: Record<LatencyClass, { border: string; tint: string; label: string }> = {
+  fast:     { border: "#3b82f6", tint: "rgba(59,130,246,0.12)",  label: "fast"     },
+  medium:   { border: "#eab308", tint: "rgba(234,179,8,0.12)",   label: "medium"   },
+  slow:     { border: "#f97316", tint: "rgba(249,115,22,0.12)",  label: "slow"     },
+  critical: { border: "#ef4444", tint: "rgba(239,68,68,0.15)",   label: "critical" },
+};
+function latencyColours(lat: LatencyClass) { return LATENCY_COLOURS[lat]; }
 
 // ─── Block + breadcrumb ─────────────────────────────────────────────────────
 
@@ -308,7 +309,7 @@ function Breadcrumb(
 
 interface BlockProps { stage: Stage; onOpen: (s: Stage) => void; totalCycles: number; }
 
-function Block({ stage, onOpen, totalCycles }: BlockProps) {
+const Block = React.memo(function Block({ stage, onOpen, totalCycles }: BlockProps) {
   const theme = useTheme();
   const col = latencyColours(stage.latency);
   const pct = ((stage.cycles / totalCycles) * 100).toFixed(1);
@@ -332,7 +333,7 @@ function Block({ stage, onOpen, totalCycles }: BlockProps) {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: theme.textMuted }}>
         <Clock size={10} />
-        <span style={{ fontFamily: "ui-monospace, monospace" }}>
+        <span style={{ fontFamily: theme.fontMono }}>
           {stage.cycles.toLocaleString()} cyc
         </span>
         <span>·</span>
@@ -343,7 +344,7 @@ function Block({ stage, onOpen, totalCycles }: BlockProps) {
       </div>
     </button>
   );
-}
+});
 
 // ─── Detail panel ───────────────────────────────────────────────────────────
 
@@ -379,7 +380,7 @@ function Detail(
       {/* Header */}
       <div style={{
         padding: "10px 14px", borderRadius: 6,
-        background: col.tint, border: `1px solid ${col.border}`,
+        background: col.tint, border: `0.5px solid ${col.border}`,
       }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: theme.text }}>
           {stage.name}
@@ -396,7 +397,7 @@ function Detail(
         {stage.formula && (
           <div style={{
             marginTop: 8, padding: "6px 10px",
-            background: theme.bg, border: `1px solid ${theme.borderDim}`, borderRadius: 4,
+            background: theme.bg, border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 4,
             fontSize: 12, fontFamily: "ui-serif, Georgia, serif",
             color: theme.text, whiteSpace: "pre-wrap",
           }}>
@@ -406,7 +407,7 @@ function Detail(
       </div>
 
       {/* Tab strip */}
-      <div style={{ display: "flex", borderBottom: `1px solid ${theme.border}` }}>
+      <div style={{ display: "flex", borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
         {tabBtn("overview", <Code2 size={11}/>,    "Overview")}
         {tabBtn("isa",      <Zap size={11}/>,      "ISA Timeline")}
         {tabBtn("data",     <Database size={11}/>, "Data Movement")}
@@ -418,9 +419,9 @@ function Detail(
           {stage.code && (
             <pre style={{
               margin: 0, padding: "10px 14px",
-              background: theme.bg, border: `1px solid ${theme.borderDim}`, borderRadius: 4,
+              background: theme.bg, border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 4,
               fontSize: 11, color: theme.text, overflowX: "auto",
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              fontFamily: theme.fontMono,
             }}>
               {stage.code}
             </pre>
@@ -447,27 +448,28 @@ function Detail(
   );
 }
 
+const UNIT_COLOUR: Record<IsaEvent["unit"], string> = {
+  Fetch: "#94a3b8", Decode: "#60a5fa", GEMV: "#22d3ee",
+  GEMM: "#a78bfa", CVO: "#e879f9", MEM: "#eab308", Retire: "#4ec86b",
+};
+
 function IsaView({ events, total }: { events: IsaEvent[]; total: number }) {
   const theme = useTheme();
   if (events.length === 0) {
     return <div style={{ fontSize: 11, color: theme.textMuted }}>No ISA events recorded at this depth.</div>;
   }
-  const unitColour: Record<IsaEvent["unit"], string> = {
-    Fetch: "#94a3b8", Decode: "#60a5fa", GEMV: "#22d3ee",
-    GEMM: "#a78bfa", CVO: "#e879f9", MEM: "#eab308", Retire: "#4ec86b",
-  };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ fontSize: 11, color: theme.textMuted, display: "flex", gap: 10 }}>
-        {Object.entries(unitColour).map(([u, c]) => (
+        {Object.entries(UNIT_COLOUR).map(([u, c]) => (
           <span key={u} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: c }} /> {u}
           </span>
         ))}
       </div>
-      <table style={{ fontSize: 11, width: "100%", borderCollapse: "collapse", fontFamily: "ui-monospace, monospace" }}>
+      <table style={{ fontSize: 11, width: "100%", borderCollapse: "collapse", fontFamily: theme.fontMono }}>
         <thead>
-          <tr style={{ color: theme.textMuted, borderBottom: `1px solid ${theme.border}` }}>
+          <tr style={{ color: theme.textMuted, borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
             <th style={{ textAlign: "right", padding: "3px 10px", width: 60 }}>cycle</th>
             <th style={{ textAlign: "left",  padding: "3px 10px", width: 90 }}>opcode</th>
             <th style={{ textAlign: "left",  padding: "3px 10px", width: 70 }}>unit</th>
@@ -477,18 +479,18 @@ function IsaView({ events, total }: { events: IsaEvent[]; total: number }) {
         </thead>
         <tbody>
           {events.map((e, i) => (
-            <tr key={i} style={{ borderBottom: `1px solid ${theme.borderDim}` }}>
+            <tr key={i} style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
               <td style={{ textAlign: "right", padding: "3px 10px", color: theme.text }}>
                 {e.cycle.toLocaleString()}
               </td>
               <td style={{ padding: "3px 10px", color: theme.accent }}>{e.op}</td>
-              <td style={{ padding: "3px 10px", color: unitColour[e.unit] }}>{e.unit}</td>
+              <td style={{ padding: "3px 10px", color: UNIT_COLOUR[e.unit] }}>{e.unit}</td>
               <td style={{ padding: "3px 10px", color: theme.textDim }}>{e.body}</td>
               <td style={{ padding: "3px 10px" }}>
-                <div style={{ position: "relative", height: 10, background: theme.bg, border: `1px solid ${theme.borderDim}`, borderRadius: 2 }}>
+                <div style={{ position: "relative", height: 10, background: theme.bg, border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 2 }}>
                   <div style={{
                     position: "absolute", left: `${(e.cycle / Math.max(total, 1)) * 100}%`,
-                    top: 0, bottom: 0, width: 4, background: unitColour[e.unit],
+                    top: 0, bottom: 0, width: 4, background: UNIT_COLOUR[e.unit],
                   }} />
                 </div>
               </td>
@@ -514,26 +516,26 @@ function DataFlowView({ moves, total }: { moves: DataMove[]; total: number }) {
         const colour = pct > 25 ? "#ef4444" : pct > 10 ? "#f97316" : pct > 4 ? "#eab308" : "#3b82f6";
         return (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: theme.text, width: 80 }}>
+            <span style={{ fontSize: 11, fontFamily: theme.fontMono, color: theme.text, width: 80 }}>
               {m.from}
             </span>
             <ArrowRight size={12} style={{ color: theme.textMuted }} />
-            <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: theme.text, width: 80 }}>
+            <span style={{ fontSize: 11, fontFamily: theme.fontMono, color: theme.text, width: 80 }}>
               {m.to}
             </span>
             <div style={{
               flex: 1, height: 14, background: theme.bg,
-              border: `1px solid ${theme.borderDim}`, borderRadius: 3, overflow: "hidden",
+              border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 3, overflow: "hidden",
             }}>
               <div style={{
                 width: `${barPct}%`, height: "100%",
                 background: `linear-gradient(90deg, ${colour}66, ${colour})`,
               }} />
             </div>
-            <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: theme.textMuted, width: 70, textAlign: "right" }}>
+            <span style={{ fontSize: 11, fontFamily: theme.fontMono, color: theme.textMuted, width: 70, textAlign: "right" }}>
               {m.bytes.toLocaleString()} B
             </span>
-            <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: colour, width: 60, textAlign: "right" }}>
+            <span style={{ fontSize: 11, fontFamily: theme.fontMono, color: colour, width: 60, textAlign: "right" }}>
               {m.cycles} cyc
             </span>
           </div>
@@ -552,17 +554,17 @@ export function ScenarioFlow() {
   const current = path[path.length - 1];
   const total = useMemo(() => SCENARIO.cycles, []);
 
-  const openStage = (s: Stage) => setPath(p => [...p, s]);
-  const jumpToPath = (idx: number) => setPath(p => p.slice(0, idx + 1));
+  const openStage = useCallback((s: Stage) => setPath(p => [...p, s]), []);
+  const jumpToPath = useCallback((idx: number) => setPath(p => p.slice(0, idx + 1)), []);
 
   return (
     <div className="w-full h-full flex flex-col overflow-hidden" style={{ background: theme.bg }}>
       {/* Header bar */}
-      <div className="flex items-center px-4 shrink-0" style={{ height: 44, borderBottom: `1px solid ${theme.border}` }}>
+      <div className="flex items-center px-4 shrink-0" style={{ height: 44, borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
         <Cpu size={16} style={{ color: theme.accent, marginRight: 8 }} />
         <span style={{ fontWeight: 700, fontSize: 13 }}>Scenario Flow</span>
         <span style={{ marginLeft: 10, fontSize: 11, color: theme.textMuted }}>
-          {t("status.cycles")}: <span style={{ fontFamily: "ui-monospace, monospace", color: theme.text }}>{total.toLocaleString()}</span>
+          {t("status.cycles")}: <span style={{ fontFamily: theme.fontMono, color: theme.text }}>{total.toLocaleString()}</span>
         </span>
         <div className="flex-1" />
         <div style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 10, color: theme.textMuted }}>
@@ -579,7 +581,7 @@ export function ScenarioFlow() {
       </div>
 
       {/* Breadcrumb */}
-      <div className="px-4 py-2 shrink-0" style={{ borderBottom: `1px solid ${theme.border}` }}>
+      <div className="px-4 py-2 shrink-0" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
         <Breadcrumb path={path} onSelect={jumpToPath} />
       </div>
 
@@ -591,7 +593,7 @@ export function ScenarioFlow() {
         {/* Mini-map sidebar showing sibling stages */}
         {path.length > 1 && (
           <div className="shrink-0 overflow-auto" style={{
-            width: 230, background: theme.bgPanel, borderLeft: `1px solid ${theme.border}`,
+            width: 230, background: theme.bgPanel, borderLeft: `0.5px solid ${theme.borderSubtle}`,
             padding: 12, display: "flex", flexDirection: "column", gap: 8,
           }}>
             <div style={{ fontSize: 10, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>
@@ -604,7 +606,7 @@ export function ScenarioFlow() {
                 style={{
                   textAlign: "left", cursor: "pointer",
                   background: sib.id === current.id ? theme.accentBg : "transparent",
-                  border: `1px solid ${sib.id === current.id ? theme.accent : theme.borderDim}`,
+                  border: `0.5px solid ${sib.id === current.id ? theme.accent : theme.borderSubtle}`,
                   borderRadius: 4, padding: "6px 8px", color: theme.text,
                 }}
               >
@@ -620,5 +622,3 @@ export function ScenarioFlow() {
     </div>
   );
 }
-
-type ReactLike = ReturnType<typeof Code2>;

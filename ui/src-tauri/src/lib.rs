@@ -1,6 +1,6 @@
 use pccx_core::pccx_format::{PccxFile, PccxHeader};
 use pccx_core::license::get_license_info as core_license_info;
-use pccx_core::trace::NpuTrace;
+use pccx_core::trace::{NpuEvent, NpuTrace};
 use pccx_core::hw_model::HardwareModel;
 use pccx_core::roofline::{
     analyze as analyze_roofline_fn,
@@ -8,6 +8,7 @@ use pccx_core::roofline::{
     RooflineBand, RooflinePoint,
 };
 use pccx_core::live_window::{LiveSample, LiveWindow};
+use pccx_core::mmap_reader::MmapTrace;
 use pccx_core::step_snapshot::{step_to_cycle as step_to_cycle_fn, RegisterSnapshot};
 use pccx_ai_copilot::{
     Extension, compress_context, generate_uvm_sequence,
@@ -28,6 +29,9 @@ struct AppState {
     /// differential flame-graph contract).  Populated by `load_pccx_alt`
     /// and consumed by `fetch_trace_payload_b`.
     pub trace_b: Mutex<Option<NpuTrace>>,
+    /// Memory-mapped trace for large-file viewport streaming. Opened by
+    /// `mmap_open_trace`, queried by `mmap_viewport` / `mmap_tile`.
+    pub mmap_trace: Mutex<Option<MmapTrace>>,
 }
 
 // ─── Tauri Commands ───────────────────────────────────────────────────────────
@@ -389,6 +393,79 @@ struct TraceEntry {
     size_bytes: u64,
 }
 
+// ─── File System Commands (Explorer / Editor) ────────────────────────────────
+
+#[derive(serde::Serialize, Clone)]
+struct FileNode {
+    name: String,
+    path: String,
+    is_dir: bool,
+    children: Option<Vec<FileNode>>,
+}
+
+/// Recursively reads a directory tree up to `depth` levels.
+/// `depth == 0` means this level only (children = None for dirs).
+/// Files always have `children = None`. Empty dirs below the depth
+/// limit get `children = Some(vec![])`. Entries that fail to read
+/// (permissions, broken symlinks) are silently skipped.
+fn build_file_tree(root: &std::path::Path, depth: u32) -> Vec<FileNode> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+
+    let mut nodes: Vec<FileNode> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+            let children = if is_dir && depth > 0 {
+                Some(build_file_tree(&path, depth - 1))
+            } else {
+                None
+            };
+            Some(FileNode {
+                name,
+                path: path.to_string_lossy().to_string(),
+                is_dir,
+                children,
+            })
+        })
+        .collect();
+
+    // Directories first, then alphabetical by name within each group.
+    nodes.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
+    nodes
+}
+
+/// Reads a directory tree rooted at `root` up to `depth` levels deep,
+/// returning a flat list of `FileNode`s suitable for the Explorer sidebar.
+/// If `root` is empty (no project loaded) returns an empty vec.
+#[tauri::command]
+fn read_file_tree(root: String, depth: u32) -> Result<Vec<FileNode>, String> {
+    if root.is_empty() {
+        return Ok(Vec::new());
+    }
+    let path = std::path::Path::new(&root);
+    if !path.is_dir() {
+        return Err(format!("'{}' is not a directory", root));
+    }
+    Ok(build_file_tree(path, depth))
+}
+
+/// Reads a text file at the given path and returns its contents as a string.
+/// Used by the code editor to populate the Monaco buffer.
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+/// Writes `content` to the text file at `path` (Ctrl+S save from the editor).
+#[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, &content).map_err(|e| e.to_string())
+}
+
 /// Merges one or more JSONL coverage-run files (emitted by the xsim
 /// testbench suite) into a unified `MergedCoverage` structure. Bin
 /// hits are summed across runs; the largest observed `goal` per bin
@@ -678,6 +755,114 @@ fn sv_completions() -> Vec<serde_json::Value> {
         .collect()
 }
 
+// ─── LSP: position-aware hover / completion / diagnostics (Phase 2 M2.3) ────
+
+/// Returns hover information for a symbol at the given line/character in
+/// a SystemVerilog source buffer. The Monaco `HoverProvider` calls this
+/// on every cursor hover. Returns `null` when there is nothing to show.
+#[tauri::command]
+fn lsp_hover(
+    uri: String,
+    line: u32,
+    character: u32,
+    source: String,
+) -> Result<Option<serde_json::Value>, String> {
+    use pccx_lsp::sv_hover::SvHoverProvider;
+    use pccx_lsp::HoverProvider;
+    let provider = SvHoverProvider::new();
+    let pos = pccx_lsp::SourcePos { line, character };
+    let result = provider
+        .hover(pccx_lsp::Language::SystemVerilog, &uri, pos, &source)
+        .map_err(|e| e.to_string())?;
+    match result {
+        Some(hover) => Ok(Some(serde_json::json!({
+            "contents": hover.contents,
+            "range": hover.range.map(|r| serde_json::json!({
+                "startLineNumber": r.start.line + 1,
+                "startColumn": r.start.character + 1,
+                "endLineNumber": r.end.line + 1,
+                "endColumn": r.end.character + 1,
+            })),
+        }))),
+        None => Ok(None),
+    }
+}
+
+/// Returns position-aware completions for a SystemVerilog source buffer.
+/// Combines `SvKeywordProvider` items with `SvHoverProvider`-derived
+/// symbol names from the parsed AST so the dropdown covers both
+/// language keywords and user-defined identifiers.
+#[tauri::command]
+fn lsp_complete(
+    uri: String,
+    line: u32,
+    character: u32,
+    source: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    use pccx_lsp::sv_provider::SvKeywordProvider;
+    use pccx_lsp::CompletionProvider;
+    let provider = SvKeywordProvider::new();
+    let pos = pccx_lsp::SourcePos { line, character };
+    let completions = provider
+        .complete(pccx_lsp::Language::SystemVerilog, &uri, pos, &source)
+        .map_err(|e| e.to_string())?;
+    Ok(completions
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "label": c.label,
+                "kind": match c.source {
+                    pccx_lsp::CompletionSource::Lsp => 14,   // Keyword
+                    pccx_lsp::CompletionSource::AiFast
+                    | pccx_lsp::CompletionSource::AiDeep => 15, // Snippet
+                    pccx_lsp::CompletionSource::Cache => 6,  // Variable
+                },
+                "detail": c.detail,
+                "insertText": c.insert_text,
+                "documentation": c.documentation,
+            })
+        })
+        .collect())
+}
+
+/// Returns diagnostics for a SystemVerilog source buffer. Called after
+/// file load and after a debounced edit. Monaco renders results via
+/// `editor.setModelMarkers`.
+#[tauri::command]
+fn lsp_diagnostics(
+    uri: String,
+    source: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    use pccx_lsp::sv_diagnostics::SvDiagnosticsProvider;
+    use pccx_lsp::DiagnosticsProvider;
+    let provider = SvDiagnosticsProvider::new();
+    let diags = provider
+        .diagnostics(pccx_lsp::Language::SystemVerilog, &uri, &source)
+        .map_err(|e| e.to_string())?;
+    Ok(diags
+        .iter()
+        .map(|d| {
+            // Map LSP severity (1=Error..4=Hint) to Monaco MarkerSeverity
+            // (8=Error, 4=Warning, 2=Info, 1=Hint).
+            let monaco_severity = match d.severity {
+                pccx_lsp::DiagnosticSeverity::Error       => 8,
+                pccx_lsp::DiagnosticSeverity::Warning     => 4,
+                pccx_lsp::DiagnosticSeverity::Information => 2,
+                pccx_lsp::DiagnosticSeverity::Hint        => 1,
+            };
+            serde_json::json!({
+                "startLineNumber": d.range.start.line + 1,
+                "startColumn": d.range.start.character + 1,
+                "endLineNumber": d.range.end.line + 1,
+                "endColumn": d.range.end.character + 1,
+                "severity": monaco_severity,
+                "message": d.message,
+                "source": d.source,
+            })
+        })
+        .collect())
+}
+
 #[tauri::command]
 fn parse_sv_file(path: String) -> Result<serde_json::Value, String> {
     let source = std::fs::read_to_string(&path)
@@ -702,6 +887,88 @@ fn eval_cx(source: String) -> Result<serde_json::Value, String> {
     }
 }
 
+// ─── MMAP Trace Commands (large-file viewport streaming) ─────────────────────
+
+/// Metadata returned by `mmap_open_trace` so the UI knows the trace
+/// dimensions without a second round-trip.
+#[derive(serde::Serialize)]
+struct MmapTraceInfo {
+    event_count: usize,
+    header: PccxHeader,
+}
+
+/// Viewport query response carrying a generation_id so the frontend
+/// can discard stale responses during fast scroll/zoom.
+#[derive(serde::Serialize)]
+struct MmapViewportResponse {
+    events: Vec<NpuEvent>,
+    generation_id: u32,
+}
+
+/// Opens a `.pccx` file via memory-mapping (flatbuf encoding only).
+/// Stores the `MmapTrace` handle in AppState for subsequent viewport
+/// and tile queries. Returns header metadata and event count.
+#[tauri::command]
+fn mmap_open_trace(
+    path: &str,
+    state: State<'_, AppState>,
+) -> Result<MmapTraceInfo, String> {
+    let mt = MmapTrace::open(path)
+        .map_err(|e| format!("Cannot mmap '{}': {}", path, e))?;
+    let info = MmapTraceInfo {
+        event_count: mt.event_count(),
+        header: mt.header().clone(),
+    };
+    *state.mmap_trace.lock().unwrap() = Some(mt);
+    Ok(info)
+}
+
+/// Returns events overlapping the `[start_cycle, end_cycle)` window
+/// from the memory-mapped trace. The caller-supplied `generation_id`
+/// is echoed back so the frontend can discard stale responses when
+/// the viewport moves faster than the IPC round-trip.
+#[tauri::command]
+fn mmap_viewport(
+    start_cycle: u64,
+    end_cycle: u64,
+    generation_id: u32,
+    state: State<'_, AppState>,
+) -> Result<MmapViewportResponse, String> {
+    let guard = state.mmap_trace.lock().unwrap();
+    let mt = guard.as_ref()
+        .ok_or("No mmap trace loaded — call mmap_open_trace first")?;
+    let events = mt.viewport(start_cycle, end_cycle);
+    Ok(MmapViewportResponse { events, generation_id })
+}
+
+/// Returns the total event count of the memory-mapped trace.
+#[tauri::command]
+fn mmap_event_count(
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let guard = state.mmap_trace.lock().unwrap();
+    let mt = guard.as_ref()
+        .ok_or("No mmap trace loaded — call mmap_open_trace first")?;
+    Ok(mt.event_count())
+}
+
+/// Returns a raw byte slice from the mmap payload for zero-copy
+/// TypedArray transfer. `offset` and `count` are byte positions
+/// relative to the payload start.
+#[tauri::command]
+fn mmap_tile(
+    offset: usize,
+    count: usize,
+    state: State<'_, AppState>,
+) -> Result<Vec<u8>, String> {
+    let guard = state.mmap_trace.lock().unwrap();
+    let mt = guard.as_ref()
+        .ok_or("No mmap trace loaded — call mmap_open_trace first")?;
+    let slice = mt.tile(offset, count)
+        .ok_or("Requested tile range exceeds payload bounds")?;
+    Ok(slice.to_vec())
+}
+
 // ─── App Entry Point ──────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -713,6 +980,7 @@ pub fn run() {
             trace_flat_buffer: Mutex::new(Vec::new()),
             trace: Mutex::new(None),
             trace_b: Mutex::new(None),
+            mmap_trace: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             load_pccx,
@@ -743,9 +1011,19 @@ pub fn run() {
             fetch_live_window,
             step_to_cycle,
             sv_completions,
+            lsp_hover,
+            lsp_complete,
+            lsp_diagnostics,
             parse_sv_file,
             generate_sv_docs,
             eval_cx,
+            read_file_tree,
+            read_text_file,
+            write_text_file,
+            mmap_open_trace,
+            mmap_viewport,
+            mmap_event_count,
+            mmap_tile,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

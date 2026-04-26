@@ -671,7 +671,7 @@ export function HardwareVisualizer() {
   return (
     <div ref={rootRef} tabIndex={0} className="w-full h-full flex flex-col outline-none" style={{ background: theme.bgPanel }}>
       {/* Header */}
-      <div className="flex items-center px-4 shrink-0 gap-3" style={{ height: 40, borderBottom: `1px solid ${theme.border}` }}>
+      <div className="flex items-center px-4 shrink-0 gap-3" style={{ height: 40, borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
         <Cpu size={16} style={{ color: theme.accent }} />
         <span style={{ fontSize: 13, fontWeight: 600 }}>System Simulator — pccx v002 / KV260 ZU5EV</span>
         <span style={{ fontSize: 10, color: theme.textMuted }}>
@@ -694,7 +694,7 @@ export function HardwareVisualizer() {
             style={iconBtn(theme)}><SkipForward size={12}/></button>
           <button onClick={() => { setCycle(0); setPlaying(false); }} style={iconBtn(theme)}><RotateCcw size={12}/></button>
           <select value={speed} onChange={e => setSpeed(Number(e.target.value))}
-                  style={{ marginLeft: 6, fontSize: 10, padding: "2px 4px", background: theme.bgInput, border: `1px solid ${theme.border}`, color: theme.text, borderRadius: 3 }}>
+                  style={{ marginLeft: 6, fontSize: 10, padding: "2px 4px", background: theme.bgInput, border: `0.5px solid ${theme.borderSubtle}`, color: theme.text, borderRadius: 3 }}>
             <option value={0.25}>0.25×</option><option value={0.5}>0.5×</option>
             <option value={1}>1×</option><option value={2}>2×</option><option value={4}>4×</option>
           </select>
@@ -704,7 +704,7 @@ export function HardwareVisualizer() {
             <input
               type="number" min={1} step={1} value={cyclesPerTick}
               onChange={e => setCyclesPerTick(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
-              style={{ width: 46, fontSize: 10, padding: "1px 4px", background: theme.bgInput, border: `1px solid ${theme.border}`, color: theme.text, borderRadius: 3 }}
+              style={{ width: 46, fontSize: 10, padding: "1px 4px", background: theme.bgInput, border: `0.5px solid ${theme.borderSubtle}`, color: theme.text, borderRadius: 3 }}
             />
           </label>
           <label style={{ fontSize: 9, color: theme.textMuted, marginLeft: 6, display: "inline-flex", alignItems: "center", gap: 4 }}
@@ -716,15 +716,15 @@ export function HardwareVisualizer() {
               onChange={e => goTo.setValue(e.target.value)}
               onKeyDown={goTo.onKeyDown}
               onBlur={goTo.commit}
-              style={{ width: 70, fontSize: 10, padding: "1px 4px", background: theme.bgInput, border: `1px solid ${theme.border}`, color: theme.text, borderRadius: 3 }}
+              style={{ width: 70, fontSize: 10, padding: "1px 4px", background: theme.bgInput, border: `0.5px solid ${theme.borderSubtle}`, color: theme.text, borderRadius: 3 }}
             />
           </label>
         </div>
       </div>
 
       {/* Scrubber */}
-      <div className="px-4 py-2 shrink-0 flex items-center gap-3" style={{ borderBottom: `1px solid ${theme.border}`, background: theme.bgSurface }}>
-        <span style={{ fontSize: 10, color: theme.textMuted, fontFamily: "monospace", width: 100 }}>cyc {cycle.toString().padStart(4, "0")} / {maxCycle}</span>
+      <div className="px-4 py-2 shrink-0 flex items-center gap-3" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bgSurface }}>
+        <span style={{ fontSize: 10, color: theme.textMuted, fontFamily: theme.fontMono, width: 100 }}>cyc {cycle.toString().padStart(4, "0")} / {maxCycle}</span>
         <input
           type="range" min={0} max={maxCycle} value={cycle}
           // Shift held → step 1 cycle at a time (honest single-clock
@@ -738,8 +738,8 @@ export function HardwareVisualizer() {
 
       <div className="flex-1 grid overflow-hidden" style={{ gridTemplateColumns: "260px 1fr 320px" }}>
         {/* Left: hierarchy tree */}
-        <div className="flex flex-col overflow-hidden" style={{ borderRight: `1px solid ${theme.border}`, background: theme.bgEditor }}>
-          <div className="flex items-center gap-2 px-2 py-1.5" style={{ borderBottom: `1px solid ${theme.border}`, background: theme.bgPanel }}>
+        <div className="flex flex-col overflow-hidden" style={{ borderRight: `0.5px solid ${theme.borderSubtle}`, background: theme.bgEditor }}>
+          <div className="flex items-center gap-2 px-2 py-1.5" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bgPanel }}>
             <Search size={12} style={{ color: theme.textMuted }}/>
             <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="filter modules"
               style={{ flex: 1, background: "transparent", border: "none", outline: "none", fontSize: 10, color: theme.text }}/>
@@ -785,8 +785,8 @@ export function HardwareVisualizer() {
         </div>
 
         {/* Right: inspector */}
-        <div className="flex flex-col overflow-auto" style={{ borderLeft: `1px solid ${theme.border}`, background: theme.bgEditor }}>
-          <div style={{ padding: "8px 12px", borderBottom: `1px solid ${theme.border}`, background: theme.bgPanel }}>
+        <div className="flex flex-col overflow-auto" style={{ borderLeft: `0.5px solid ${theme.borderSubtle}`, background: theme.bgEditor }}>
+          <div style={{ padding: "8px 12px", borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bgPanel }}>
             <div style={{ fontSize: 9, color: theme.textMuted, letterSpacing: "0.05em" }}>INSPECTOR</div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: KIND_COLOR[selectedMod.kind] }}/>
@@ -862,7 +862,7 @@ export function HardwareVisualizer() {
       </div>
 
       {/* Legend */}
-      <div className="shrink-0 flex items-center gap-4 px-4 py-1.5" style={{ borderTop: `1px solid ${theme.border}`, background: theme.bgSurface, fontSize: 10, color: theme.textMuted }}>
+      <div className="shrink-0 flex items-center gap-4 px-4 py-1.5" style={{ borderTop: `0.5px solid ${theme.borderSubtle}`, background: theme.bgSurface, fontSize: 10, color: theme.textMuted }}>
         <Legend color={theme.accent}  label="busy"/>
         <Legend color={theme.error}   label="stall"/>
         <Legend color={theme.success} label="done"/>
@@ -877,7 +877,7 @@ export function HardwareVisualizer() {
 function iconBtn(theme: ReturnType<typeof useTheme>): React.CSSProperties {
   return {
     padding: "4px 6px", fontSize: 10, background: theme.bgSurface,
-    border: `1px solid ${theme.border}`, borderRadius: 3,
+    border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 3,
     color: theme.textDim, cursor: "pointer",
     display: "inline-flex", alignItems: "center", gap: 4,
   };

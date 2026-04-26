@@ -12,6 +12,7 @@
  */
 import React, { useState } from "react";
 import { getEffectiveKeybindings, COMMAND_LABELS, type KeyBinding } from "./keybindings";
+import { useTheme } from "./ThemeContext";
 
 export interface Shortcut {
   key: string;
@@ -66,6 +67,7 @@ interface ShortcutHelpProps {
  * `aria-modal="true"`; dismiss with `Escape` or the close button.
  */
 export function ShortcutHelp({ open, onClose }: ShortcutHelpProps): React.ReactElement | null {
+  const theme = useTheme();
   if (!open) return null;
   const bindings = getEffectiveKeybindings().map(toShortcut);
   return (
@@ -86,7 +88,7 @@ export function ShortcutHelp({ open, onClose }: ShortcutHelpProps): React.ReactE
           minWidth: 460, maxWidth: 640, maxHeight: "80vh",
           background: "var(--pccx-surface, #1e1e1e)",
           color: "var(--pccx-text, #e6e6e6)",
-          border: "1px solid rgba(255,255,255,0.12)",
+          border: "0.5px solid rgba(255,255,255,0.12)",
           borderRadius: 6, padding: 20, overflow: "auto",
           fontFamily: "Inter, system-ui, sans-serif",
         }}
@@ -115,10 +117,10 @@ export function ShortcutHelp({ open, onClose }: ShortcutHelpProps): React.ReactE
                 <td style={{ padding: "6px 10px 6px 0", whiteSpace: "nowrap" }}>
                   <kbd
                     style={{
-                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                      fontFamily: theme.fontMono,
                       fontSize: 11, padding: "1px 6px", borderRadius: 3,
                       background: "rgba(255,255,255,0.08)",
-                      border: "1px solid rgba(255,255,255,0.14)",
+                      border: "0.5px solid rgba(255,255,255,0.14)",
                     }}
                   >{s.key}</kbd>
                 </td>

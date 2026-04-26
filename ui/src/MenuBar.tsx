@@ -127,9 +127,9 @@ function Dropdown({ menu, onClose }: { menu: Menu; onClose: () => void }) {
   const theme = useTheme();
   return (
     <div role="menu" aria-label={`${menu.label} menu`} className="absolute top-full left-0 z-50 min-w-[230px] py-1 rounded-sm shadow-2xl"
-      style={{ background: theme.bgSurface, border: `1px solid ${theme.border}` }}>
+      style={{ background: theme.bgSurface, border: `0.5px solid ${theme.borderSubtle}`, borderRadius: 8 }}>
       {menu.items.map((item, i) => {
-        if (item.separator) return <div key={i} role="separator" className="my-1" style={{ borderTop: `1px solid ${theme.borderDim}` }} />;
+        if (item.separator) return <div key={i} role="separator" className="my-1" style={{ borderTop: `0.5px solid ${theme.borderSubtle}` }} />;
         return (
           <button key={i} role="menuitem" aria-label={item.label} aria-disabled={item.disabled} disabled={item.disabled} onClick={() => { item.action?.(); onClose(); }}
             style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 16px", fontSize: 11,
@@ -138,7 +138,7 @@ function Dropdown({ menu, onClose }: { menu: Menu; onClose: () => void }) {
             onMouseEnter={e => { if (!item.disabled) e.currentTarget.style.background = theme.bgHover; }}
             onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
             <span>{item.label}</span>
-            {item.shortcut && <span style={{ marginLeft: 24, fontSize: 10, color: theme.textFaint, fontFamily: "monospace" }}>{item.shortcut}</span>}
+            {item.shortcut && <span style={{ marginLeft: 24, fontSize: 10, color: theme.textFaint, fontFamily: theme.fontMono }}>{item.shortcut}</span>}
           </button>
         );
       })}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import {
   ReactFlow,
   MiniMap,
@@ -23,20 +23,20 @@ import { useTheme } from "./ThemeContext";
 
 function useNodeStyle() {
   const theme = useTheme();
-  return {
-    background: theme.mode === "dark" ? "#252526" : "#ffffff",
+  return useMemo(() => ({
+    background: theme.bgPanel,
     border: "1.5px solid",
     borderRadius: 8,
     minWidth: 210,
     fontFamily: "Inter, sans-serif",
     boxShadow: theme.mode === "dark" ? "0 4px 20px rgba(0,0,0,0.4)" : "0 2px 12px rgba(0,0,0,0.08)",
-  };
+  }), [theme.bgPanel, theme.mode]);
 }
 
 function Header({ title, sub, color }: { title: string; sub?: string; color: string }) {
   const theme = useTheme();
   return (
-    <div style={{ padding: "6px 10px", borderBottom: `1px solid ${theme.mode === "dark" ? "#3e3e3e" : "rgba(0,0,0,0.06)"}`, background: `linear-gradient(135deg, ${color}22, ${color}11)`, borderRadius: "6px 6px 0 0" }}>
+    <div style={{ padding: "6px 10px", borderBottom: `1px solid ${theme.border}`, background: `linear-gradient(135deg, ${color}22, ${color}11)`, borderRadius: "6px 6px 0 0" }}>
       <div style={{ fontSize: 11, fontWeight: 700, color }}>● {title}</div>
       {sub && <div style={{ fontSize: 9, color: theme.textDim, marginTop: 1 }}>{sub}</div>}
     </div>
@@ -49,21 +49,20 @@ function Field({ label, value, unit, type = "number", options, onChange, min, ma
   options?: string[]; onChange?: (v: string) => void; min?: number; max?: number;
 }) {
   const theme = useTheme();
-  const d = theme.mode === "dark";
   return (
     <div className="flex items-center justify-between gap-2 py-[3px] px-3">
       <span style={{ fontSize: 10, color: theme.textMuted, whiteSpace: "nowrap" }}>{label}</span>
       <div className="flex items-center gap-1">
         {type === "select" && options ? (
           <select value={value} onChange={e => onChange?.(e.target.value)}
-            style={{ fontSize: 10, background: d ? "#3c3c3c" : "#f3f4f6", border: `1px solid ${d ? "#4a4a4a" : "#d1d5db"}`, borderRadius: 3, color: theme.text, padding: "1px 4px" }}>
+            style={{ fontSize: 10, background: theme.bgInput, border: `1px solid ${theme.border}`, borderRadius: 3, color: theme.text, padding: "1px 4px" }}>
             {options.map(o => <option key={o}>{o}</option>)}
           </select>
         ) : type === "range" ? (
-          <input type="range" min={min} max={max} value={value} onChange={e => onChange?.(e.target.value)} style={{ width: 65, accentColor: "#3b82f6" }} />
+          <input type="range" min={min} max={max} value={value} onChange={e => onChange?.(e.target.value)} style={{ width: 65, accentColor: theme.accent }} />
         ) : (
           <input type={type === "number" ? "number" : "text"} value={value} min={min} max={max} onChange={e => onChange?.(e.target.value)}
-            style={{ width: 65, fontSize: 10, background: d ? "#3c3c3c" : "#f3f4f6", border: `1px solid ${d ? "#4a4a4a" : "#d1d5db"}`, borderRadius: 3, color: theme.text, padding: "1px 6px", textAlign: "right" }} />
+            style={{ width: 65, fontSize: 10, background: theme.bgInput, border: `1px solid ${theme.border}`, borderRadius: 3, color: theme.text, padding: "1px 6px", textAlign: "right" }} />
         )}
         {unit && <span style={{ fontSize: 9, color: theme.textMuted }}>{unit}</span>}
       </div>
@@ -82,12 +81,11 @@ function BlenderPorts({ inputs, outputs }: {
   outputs: PortDef[];
 }) {
   const theme = useTheme();
-  const isDark = theme.mode === "dark";
   const ROW_H = 22;
   const maxRows = Math.max(inputs.length, outputs.length);
 
   return (
-    <div style={{ position: "relative", borderTop: `1px solid ${isDark ? "#3e3e3e" : "rgba(0,0,0,0.06)"}` }}>
+    <div style={{ position: "relative", borderTop: `0.5px solid ${theme.borderSubtle}` }}>
       {Array.from({ length: maxRows }, (_, i) => {
         const inp = inputs[i];
         const out = outputs[i];
@@ -108,7 +106,7 @@ function BlenderPorts({ inputs, outputs }: {
       {inputs.map((p, i) => (
         <Handle key={`in-${p.id}`} type="target" id={p.id} position={Position.Left}
           style={{
-            background: p.color, border: `2px solid ${isDark ? "#252526" : "#ffffff"}`,
+            background: p.color, border: `2px solid ${theme.bgPanel}`,
             width: 10, height: 10, left: -5,
             top: `${((i + 0.5) / maxRows) * 100}%`,
           }} />
@@ -116,7 +114,7 @@ function BlenderPorts({ inputs, outputs }: {
       {outputs.map((p, i) => (
         <Handle key={`out-${p.id}`} type="source" id={p.id} position={Position.Right}
           style={{
-            background: p.color, border: `2px solid ${isDark ? "#252526" : "#ffffff"}`,
+            background: p.color, border: `2px solid ${theme.bgPanel}`,
             width: 10, height: 10, right: -5,
             top: `${((i + 0.5) / maxRows) * 100}%`,
           }} />
@@ -127,7 +125,7 @@ function BlenderPorts({ inputs, outputs }: {
 
 // ─── Nodes ────────────────────────────────────────────────────────────────────
 
-function HostNode(_: NodeProps) {
+const HostNode = React.memo(function HostNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#94a3b8";
   return (
     <div style={{ ...s, borderColor: c + "55" }}>
@@ -145,9 +143,9 @@ function HostNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
-function DramNode(_: NodeProps) {
+const DramNode = React.memo(function DramNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#60a5fa";
   const [bw, setBw] = useState("68"); const [cap, setCap] = useState("16");
   return (
@@ -167,9 +165,9 @@ function DramNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
-function AxiNode(_: NodeProps) {
+const AxiNode = React.memo(function AxiNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#818cf8";
   const [bw, setBw] = useState("16"); const [burst, setBurst] = useState("16");
   return (
@@ -194,9 +192,9 @@ function AxiNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
-function BramNode(_: NodeProps) {
+const BramNode = React.memo(function BramNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#34d399";
   const [cap, setCap] = useState("1024");
   return (
@@ -218,9 +216,10 @@ function BramNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
-function MacNode(_: NodeProps) {
+const MacNode = React.memo(function MacNode(_: NodeProps) {
+  const theme = useTheme();
   const s = useNodeStyle(); const c = "#a78bfa";
   const [rows, setRows] = useState("32"); const [cols, setCols] = useState("32"); const [clk, setClk] = useState("1000");
   const tops = (Number(rows) * Number(cols) * 2 * 32 * Number(clk) * 1e6 / 1e12).toFixed(2);
@@ -233,7 +232,7 @@ function MacNode(_: NodeProps) {
         <Field label="Precision" value="BF16" type="select" options={["INT8","BF16","FP16","FP32"]} />
         <Field label="Clock" value={clk} unit="MHz" onChange={setClk} />
         <Field label="Pipeline" value="10" unit="stg" />
-        <div style={{ margin: "4px 12px 2px", padding: "4px 6px", background: "#333333", borderRadius: 4, textAlign: "center" }}>
+        <div style={{ margin: "4px 12px 2px", padding: "4px 6px", background: theme.bgHover, borderRadius: 4, textAlign: "center" }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: c }}>{tops} TOPS</span>
         </div>
       </div>
@@ -249,9 +248,9 @@ function MacNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
-function AccumNode(_: NodeProps) {
+const AccumNode = React.memo(function AccumNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#f59e0b";
   return (
     <div style={{ ...s, borderColor: c + "55" }}>
@@ -267,9 +266,9 @@ function AccumNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
-function PostProcNode(_: NodeProps) {
+const PostProcNode = React.memo(function PostProcNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#fb923c";
   return (
     <div style={{ ...s, borderColor: c + "55" }}>
@@ -289,9 +288,9 @@ function PostProcNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
-function WriteBackNode(_: NodeProps) {
+const WriteBackNode = React.memo(function WriteBackNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#f472b6";
   return (
     <div style={{ ...s, borderColor: c + "55" }}>
@@ -307,11 +306,11 @@ function WriteBackNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
 // ─── pccx v002-specific nodes (Blender-style rich palette) ────────────────────
 
-function GemvNode(_: NodeProps) {
+const GemvNode = React.memo(function GemvNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#22d3ee";
   const [lanes, setLanes] = useState("4");
   return (
@@ -335,9 +334,9 @@ function GemvNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
-function CvoNode(_: NodeProps) {
+const CvoNode = React.memo(function CvoNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#e879f9";
   return (
     <div style={{ ...s, borderColor: c + "55" }}>
@@ -354,9 +353,9 @@ function CvoNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
-function HpBufferNode(_: NodeProps) {
+const HpBufferNode = React.memo(function HpBufferNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#f87171";
   return (
     <div style={{ ...s, borderColor: c + "55" }}>
@@ -375,9 +374,9 @@ function HpBufferNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
-function UramNode(_: NodeProps) {
+const UramNode = React.memo(function UramNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#14b8a6";
   return (
     <div style={{ ...s, borderColor: c + "55" }}>
@@ -397,9 +396,9 @@ function UramNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
-function FmapCacheNode(_: NodeProps) {
+const FmapCacheNode = React.memo(function FmapCacheNode(_: NodeProps) {
   const s = useNodeStyle(); const c = "#eab308";
   return (
     <div style={{ ...s, borderColor: c + "55" }}>
@@ -416,7 +415,7 @@ function FmapCacheNode(_: NodeProps) {
       />
     </div>
   );
-}
+});
 
 // ─── Registration ─────────────────────────────────────────────────────────────
 const nodeTypes: NodeTypes = {
@@ -426,6 +425,16 @@ const nodeTypes: NodeTypes = {
   gemv: GemvNode as any, cvo: CvoNode as any, hpbuf: HpBufferNode as any,
   uram: UramNode as any, fmapcache: FmapCacheNode as any,
 };
+
+const MINIMAP_NODE_COLORS: Record<string, string> = {
+  dram: "#60a5fa", axi: "#818cf8", bram: "#34d399",
+  mac: "#a78bfa", accum: "#f59e0b", postproc: "#fb923c",
+  writeback: "#f472b6", host: "#94a3b8",
+  gemv: "#22d3ee", cvo: "#e879f9", hpbuf: "#f87171",
+  uram: "#14b8a6", fmapcache: "#eab308",
+};
+const minimapNodeColor = (n: Node) => MINIMAP_NODE_COLORS[n.type ?? ""] ?? "#4a4a4a";
+const DEFAULT_EDGE_STYLE = { stroke: "#6b7280", strokeWidth: 1.5 };
 
 function buildGraph() {
   const nodes: Node[] = [
@@ -516,7 +525,6 @@ function Sidebar({ onSpawn }: { onSpawn: (id: string) => void }) {
   };
 
   const visible = useMemo(() => paletteSearch(query), [query]);
-  const dark = theme.mode === "dark";
 
   return (
     <div className="w-[240px] shrink-0 flex flex-col" style={{ background: theme.bgPanel, borderRight: `1px solid ${theme.border}` }}>
@@ -531,7 +539,7 @@ function Sidebar({ onSpawn }: { onSpawn: (id: string) => void }) {
           placeholder="Search nodes…"
           style={{
             width: "100%", fontSize: 11, padding: "5px 8px",
-            background: dark ? "#2d2d2d" : "#ffffff",
+            background: theme.bgSurface,
             border: `1px solid ${theme.border}`,
             borderRadius: 4,
             color: theme.text,
@@ -615,13 +623,12 @@ function QuickAddMenu(
   useEffect(() => { setQuery(""); }, [pos]);
   if (!pos) return null;
   const results = paletteSearch(query);
-  const dark = theme.mode === "dark";
   return (
     <div
       onMouseDown={e => e.stopPropagation()}
       style={{
         position: "absolute", left: pos.x, top: pos.y, zIndex: 1000,
-        width: 260, background: dark ? "#1e1e1e" : "#ffffff",
+        width: 260, background: theme.bgEditor,
         border: `1px solid ${theme.border}`, borderRadius: 6,
         boxShadow: "0 8px 24px rgba(0,0,0,0.35)", padding: 6,
       }}
@@ -634,7 +641,7 @@ function QuickAddMenu(
         placeholder="Add node…  (Esc to close)"
         style={{
           width: "100%", fontSize: 11, padding: "5px 8px", marginBottom: 4,
-          background: dark ? "#2d2d2d" : "#f4f4f4",
+          background: theme.bgSurface,
           border: `1px solid ${theme.border}`, borderRadius: 4,
           color: theme.text,
         }}
@@ -692,7 +699,7 @@ function DnDFlow() {
 
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
 
-  const onConnect = useCallback((p: Connection) => setEdges(eds => addEdge({ ...p, animated: true, style: { stroke: "#6b7280", strokeWidth: 1.5 }, deletable: true }, eds)), [setEdges]);
+  const onConnect = useCallback((p: Connection) => setEdges(eds => addEdge({ ...p, animated: true, style: DEFAULT_EDGE_STYLE, deletable: true }, eds)), [setEdges]);
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -785,20 +792,11 @@ function DnDFlow() {
         >
           <Controls showInteractive={false} />
           <MiniMap
-            nodeColor={n => {
-              const c: Record<string, string> = {
-                dram:"#60a5fa", axi:"#818cf8", bram:"#34d399",
-                mac:"#a78bfa", accum:"#f59e0b", postproc:"#fb923c",
-                writeback:"#f472b6", host:"#94a3b8",
-                gemv:"#22d3ee", cvo:"#e879f9", hpbuf:"#f87171",
-                uram:"#14b8a6", fmapcache:"#eab308",
-              };
-              return c[n.type ?? ""] ?? "#4a4a4a";
-            }}
+            nodeColor={minimapNodeColor}
             maskColor={theme.mode === "dark" ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)"}
             style={{ background: theme.bgPanel, border: `1px solid ${theme.border}` }}
           />
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={theme.mode === "dark" ? "#3e3e3e" : "#e5e7eb"} />
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color={theme.border} />
         </ReactFlow>
       </div>
     </div>
