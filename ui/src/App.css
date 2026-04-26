@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "@radix-ui/themes/styles.css";
+@import "flexlayout-react/style/dark.css";
 
 :root {
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;

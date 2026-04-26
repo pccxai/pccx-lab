@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, Suspense, lazy } from "react";
+import { useState, useEffect, useRef, Suspense, lazy, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { resolveResource } from "@tauri-apps/api/path";
-import { Group, Panel, Separator } from "react-resizable-panels";
+import { Layout, Model, Actions, DockLocation, TabNode, IJsonModel } from "flexlayout-react";
+import type { ITabRenderValues } from "flexlayout-react";
 
 import { ThemeProvider, useTheme } from "./ThemeContext";
 import { I18nProvider, useI18n } from "./i18n";
@@ -31,6 +32,9 @@ const WaveformViewer     = lazy(() => import("./WaveformViewer").then(m => ({ de
 const Roofline           = lazy(() => import("./Roofline").then(m => ({ default: m.Roofline })));
 const ScenarioFlow       = lazy(() => import("./ScenarioFlow").then(m => ({ default: m.ScenarioFlow })));
 const TestbenchAuthor    = lazy(() => import("./TestbenchAuthor").then(m => ({ default: m.TestbenchAuthor })));
+const OccupancyCalculator = lazy(() => import("./OccupancyCalculator").then(m => ({ default: m.OccupancyCalculator })));
+const MetricTree          = lazy(() => import("./MetricTree").then(m => ({ default: m.MetricTree })));
+const PipelineDiagram     = lazy(() => import("./PipelineDiagram").then(m => ({ default: m.PipelineDiagram })));
 
 import { Button, Flex, TextField } from "@radix-ui/themes";
 import {
@@ -39,31 +43,16 @@ import {
   Code2, Box, Layers, Cpu, ActivitySquare, PieChart,
   FolderTree, Search, Blocks, GitBranch, Terminal,
   BarChart3, Radio, X, FileText, Database,
+  Maximize2, Minimize2, MoreHorizontal, ExternalLink,
+  SplitSquareHorizontal, SplitSquareVertical, XCircle,
+  Workflow,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ActiveTab = "timeline" | "flamegraph" | "hardware" | "memory" | "waves" | "nodes" | "canvas" | "code" | "cx" | "report" | "extensions" | "verify" | "roofline" | "scenario" | "tb_author";
+type ActiveTab = "timeline" | "flamegraph" | "hardware" | "memory" | "waves" | "nodes" | "canvas" | "code" | "cx" | "report" | "extensions" | "verify" | "roofline" | "scenario" | "tb_author" | "occupancy" | "metric_tree" | "pipeline";
 type SidebarTab = "files" | "search" | "modules" | "extensions" | "verify" | "git";
-type InspectorTab = "copilot" | "stats" | "telemetry";
-
 interface ChatMessage { role: "system" | "user" | "ai"; content: string; }
-
-const TABS: { id: ActiveTab; label: string; icon: React.ReactNode }[] = [
-  { id: "scenario",   label: "Scenario",    icon: <Zap size={12} />            },
-  { id: "timeline",   label: "Timeline",    icon: <Clock size={12} />          },
-  { id: "flamegraph", label: "Flame Graph", icon: <Layers size={12} />         },
-  { id: "waves",      label: "Waveform",    icon: <ActivitySquare size={12} /> },
-  { id: "hardware",   label: "Simulator",   icon: <Cpu size={12} />            },
-  { id: "nodes",      label: "Data Flow",   icon: <Activity size={12} />       },
-  { id: "code",       label: "Editor",      icon: <Code2 size={12} />          },
-  { id: "cx",         label: "CX",          icon: <Terminal size={12} />       },
-  { id: "tb_author",  label: "Testbench",   icon: <LayoutDashboard size={12} />},
-  { id: "canvas",     label: "3D View",     icon: <Box size={12} />            },
-  { id: "roofline",   label: "Roofline",    icon: <PieChart size={12} />       },
-  { id: "report",    label: "Report",      icon: <FileText size={12} />       },
-  { id: "memory",    label: "Memory",      icon: <Database size={12} />       },
-];
 
 const SIDEBAR_ITEMS: { id: SidebarTab; icon: React.ReactNode; label: string }[] = [
   { id: "files",      icon: <FolderTree size={17} />,  label: "Explorer" },
@@ -74,26 +63,153 @@ const SIDEBAR_ITEMS: { id: SidebarTab; icon: React.ReactNode; label: string }[] 
   { id: "extensions", icon: <Settings2 size={17} />,   label: "Extensions" },
 ];
 
-const INSPECTOR_TABS: { id: InspectorTab; icon: React.ReactNode; label: string }[] = [
-  { id: "copilot",   icon: <BrainCircuit size={13} />, label: "Copilot" },
-  { id: "stats",     icon: <BarChart3 size={13} />,    label: "Stats" },
-  { id: "telemetry", icon: <Radio size={13} />,        label: "Telemetry" },
-];
+// Inspector tab IDs (border-right panel tabs are defined in the layout model)
 
-// ─── Resize Handle ────────────────────────────────────────────────────────────
+// ─── Layout Persistence ──────────────────────────────────────────────────────
 
-function ResizeHandle({ direction = "horizontal" }: { direction?: "horizontal" | "vertical" }) {
+const LAYOUT_STORAGE_KEY = "pccx-dock-layout";
+const LAYOUT_VERSION = 1;
+
+function saveLayout(model: Model) {
+  try {
+    const json = model.toJson();
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({ version: LAYOUT_VERSION, model: json }));
+  } catch { /* quota exceeded or serialization error — silently skip */ }
+}
+
+function loadLayout(): IJsonModel | null {
+  try {
+    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed.version !== LAYOUT_VERSION) return null;
+    return parsed.model as IJsonModel;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Default Layout JSON ─────────────────────────────────────────────────────
+
+const DEFAULT_LAYOUT: IJsonModel = {
+  global: {
+    tabEnableClose: true,
+    tabEnableDrag: true,
+    tabEnableRename: false,
+    tabEnablePopout: true,
+    tabSetEnableMaximize: true,
+    tabSetEnableClose: false,
+    tabSetEnableDeleteWhenEmpty: true,
+    tabSetMinHeight: 100,
+    tabSetMinWidth: 100,
+    borderEnableAutoHide: true,
+    borderSize: 240,
+    borderMinSize: 100,
+  },
+  borders: [
+    {
+      type: "border",
+      location: "left",
+      size: 240,
+      selected: 0,
+      children: [
+        { type: "tab", id: "border-explorer", name: "Explorer", component: "explorer", enableClose: false },
+        { type: "tab", id: "border-search", name: "Search", component: "search" },
+        { type: "tab", id: "border-modules", name: "Modules", component: "modules" },
+        { type: "tab", id: "border-git", name: "Source Control", component: "git" },
+        { type: "tab", id: "border-verify", name: "Verification", component: "verify-sidebar" },
+        { type: "tab", id: "border-extensions", name: "Extensions", component: "extensions-sidebar" },
+      ],
+    },
+    {
+      type: "border",
+      location: "right",
+      size: 280,
+      selected: 0,
+      children: [
+        { type: "tab", id: "border-copilot", name: "Copilot", component: "copilot", enableClose: false },
+        { type: "tab", id: "border-stats", name: "Stats", component: "stats" },
+        { type: "tab", id: "border-telemetry", name: "Telemetry", component: "telemetry" },
+      ],
+    },
+    {
+      type: "border",
+      location: "bottom",
+      size: 200,
+      selected: 0,
+      children: [
+        { type: "tab", id: "border-console", name: "Console", component: "bottom-panel", enableClose: false },
+      ],
+    },
+  ],
+  layout: {
+    type: "row",
+    weight: 100,
+    children: [
+      {
+        type: "tabset",
+        id: "center-tabset",
+        weight: 100,
+        active: true,
+        children: [
+          { type: "tab", id: "timeline",   name: "Timeline",    component: "timeline" },
+          { type: "tab", id: "code",       name: "Editor",      component: "code" },
+          { type: "tab", id: "waves",      name: "Waveform",    component: "waves" },
+          { type: "tab", id: "flamegraph", name: "Flame Graph", component: "flamegraph" },
+        ],
+      },
+    ],
+  },
+};
+
+// ─── Context Menu ─────────────────────────────────────────────────────────────
+
+interface ContextMenuProps {
+  x: number;
+  y: number;
+  items: { label: string; icon?: React.ReactNode; onClick: () => void; separator?: boolean }[];
+  onClose: () => void;
+}
+
+function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   const theme = useTheme();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
   return (
-    <Separator
-      className={`group relative ${direction === "vertical" ? "h-[3px]" : "w-[3px]"} flex items-center justify-center`}
-      style={{
-        background: "transparent",
-        cursor: direction === "vertical" ? "row-resize" : "col-resize",
-      }}
-      onMouseEnter={(e: any) => e.currentTarget.style.background = theme.accentBg}
-      onMouseLeave={(e: any) => e.currentTarget.style.background = "transparent"}
-    />
+    <div ref={ref} style={{
+      position: "fixed", left: x, top: y, zIndex: 10000,
+      background: theme.bgSurface, border: `1px solid ${theme.border}`,
+      borderRadius: 8, padding: "4px 0", minWidth: 180,
+      boxShadow: theme.shadowMd, backdropFilter: "blur(12px)",
+    }}>
+      {items.map((item, i) => (
+        <div key={i}>
+          {item.separator && <div style={{ height: 1, background: theme.borderSubtle, margin: "4px 8px" }} />}
+          <button
+            onClick={() => { item.onClick(); onClose(); }}
+            style={{
+              display: "flex", alignItems: "center", gap: 8,
+              width: "100%", padding: "5px 12px", border: "none",
+              background: "transparent", color: theme.text, fontSize: 12,
+              cursor: "pointer", textAlign: "left",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = theme.bgGlassHover; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+          >
+            {item.icon && <span style={{ color: theme.textMuted, display: "flex" }}>{item.icon}</span>}
+            {item.label}
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -104,23 +220,48 @@ function AppInner() {
   const { t } = useI18n();
   const [header, setHeader]       = useState<any>(null);
   const [license, setLicense]     = useState("");
-  const [activeTab, setActiveTab] = useState<ActiveTab>("timeline");
-  const [visitedTabs, setVisitedTabs] = useState<Set<ActiveTab>>(() => new Set(["timeline"]));
   const [traceLoaded, setTraceLoaded] = useState(false);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
-  const [sidebarVisible, setSidebarVisible] = useState(true);
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("files");
-  const [inspectorVisible, setInspectorVisible] = useState(true);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("copilot");
-  const [bottomVisible, setBottomVisible] = useState(true);
   const shortcutHelp = useShortcutHelp();
+  const layoutRef = useRef<any>(null);
+
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
+
+  // ── FlexLayout Model ──────────────────────────────────────────────────
+
+  const [model] = useState<Model>(() => {
+    const saved = loadLayout();
+    try {
+      if (saved) return Model.fromJson(saved);
+    } catch { /* corrupted layout — fall back to default */ }
+    return Model.fromJson(DEFAULT_LAYOUT);
+  });
+
+  // Force re-render on model changes (needed for activity bar highlight sync)
+  const [, setModelTick] = useState(0);
 
   useEffect(() => {
-    setVisitedTabs(prev => {
-      if (prev.has(activeTab)) return prev;
-      return new Set(prev).add(activeTab);
-    });
-  }, [activeTab]);
+    const listener = () => {
+      setModelTick(t => t + 1);
+      saveLayout(model);
+    };
+    model.addChangeListener(listener);
+    return () => model.removeChangeListener(listener);
+  }, [model]);
+
+  const handleModelChange = useCallback(() => {
+    saveLayout(model);
+  }, [model]);
+
+  // Track active tab for StatusBar
+  const [activeTabId, setActiveTabId] = useState<string>("timeline");
+
+  const handleAction = useCallback((action: any) => {
+    if (action.type === Actions.SELECT_TAB) {
+      setActiveTabId(action.data.tabNode);
+    }
+    return action;
+  }, []);
 
   const handleMenuActionRef = useRef<(action: string) => void>(() => {});
 
@@ -138,11 +279,45 @@ function AppInner() {
   }, []);
 
   const handleSidebarFileOpen = (_path: string, _name: string) => {
-    setActiveTab("code");
+    selectOrAddTab("code", "Editor", "code");
     if ((CodeEditor as any).openFile) {
       (CodeEditor as any).openFile(_path, _name);
     }
   };
+
+  // Ensure a tab is selected; add it if user previously closed it
+  const selectOrAddTab = useCallback((tabId: string, name: string, component: string) => {
+    const node = model.getNodeById(tabId);
+    if (node) {
+      model.doAction(Actions.selectTab(tabId));
+    } else {
+      const tabset = model.getActiveTabset() || model.getFirstTabSet();
+      if (tabset) {
+        model.doAction(Actions.addTab(
+          { type: "tab", id: tabId, name, component },
+          tabset.getId(),
+          DockLocation.CENTER,
+          -1,
+          true,
+        ));
+      }
+    }
+  }, [model]);
+
+  // Toggle a border panel by selecting its tab or deselecting
+  const toggleBorderTab = useCallback((borderTabId: string) => {
+    const node = model.getNodeById(borderTabId);
+    if (!node) return;
+    const parent = node.getParent();
+    if (!parent) return;
+    const isSelected = (node as TabNode).isSelected();
+    if (isSelected) {
+      // Deselect = collapse border
+      model.doAction(Actions.updateNodeAttributes(parent.getId(), { selected: -1 }));
+    } else {
+      model.doAction(Actions.selectTab(borderTabId));
+    }
+  }, [model]);
 
   // ── AI Chat ──────────────────────────────────────────────────────────────
 
@@ -177,6 +352,27 @@ function AppInner() {
 
   // ── Menu Actions ─────────────────────────────────────────────────────────
 
+  const TAB_META: Record<string, { name: string; component: string }> = {
+    timeline:   { name: "Timeline",    component: "timeline" },
+    flamegraph: { name: "Flame Graph", component: "flamegraph" },
+    hardware:   { name: "Simulator",   component: "hardware" },
+    memory:     { name: "Memory",      component: "memory" },
+    waves:      { name: "Waveform",    component: "waves" },
+    nodes:      { name: "Data Flow",   component: "nodes" },
+    canvas:     { name: "3D View",     component: "canvas" },
+    code:       { name: "Editor",      component: "code" },
+    cx:         { name: "CX",          component: "cx" },
+    report:     { name: "Report",      component: "report" },
+    extensions: { name: "Extensions",  component: "extensions" },
+    verify:     { name: "Verify",      component: "verify" },
+    roofline:   { name: "Roofline",    component: "roofline" },
+    scenario:   { name: "Scenario",    component: "scenario" },
+    tb_author:  { name: "Testbench",   component: "tb_author" },
+    occupancy:  { name: "Occupancy",   component: "occupancy" },
+    metric_tree: { name: "Metrics",    component: "metric_tree" },
+    pipeline:   { name: "Pipeline",    component: "pipeline" },
+  };
+
   const handleMenuAction = async (action: string) => {
     const win = getCurrentWindow();
     const tabMap: Record<string, ActiveTab> = {
@@ -186,28 +382,44 @@ function AppInner() {
       "view.waves": "waves", "view.cx": "cx",
       "analysis.roofline": "roofline",
     };
-    if (tabMap[action]) { setActiveTab(tabMap[action]); return; }
-    const sidebarMap: Record<string, SidebarTab> = {
-      "view.extensions": "extensions", "view.verify": "verify",
-      "verify.isa": "verify", "verify.api": "verify", "verify.uvm": "verify", "verify.regression": "verify",
+    if (tabMap[action]) {
+      const id = tabMap[action];
+      const meta = TAB_META[id];
+      if (meta) selectOrAddTab(id, meta.name, meta.component);
+      return;
+    }
+
+    const sidebarBorderMap: Record<string, string> = {
+      "view.extensions":   "border-extensions",
+      "view.verify":       "border-verify",
+      "verify.isa":        "border-verify",
+      "verify.api":        "border-verify",
+      "verify.uvm":        "border-verify",
+      "verify.regression": "border-verify",
     };
-    if (sidebarMap[action]) { setSidebarTab(sidebarMap[action]); setSidebarVisible(true); return; }
+    if (sidebarBorderMap[action]) {
+      model.doAction(Actions.selectTab(sidebarBorderMap[action]));
+      return;
+    }
+
     switch (action) {
-      case "view.copilot": setInspectorVisible(v => !v); break;
-      case "view.bottom":  setBottomVisible(v => !v); break;
-      case "view.sidebar": setSidebarVisible(v => !v); break;
+      case "view.copilot": toggleBorderTab("border-copilot"); break;
+      case "view.bottom":  toggleBorderTab("border-console"); break;
+      case "view.sidebar": toggleBorderTab("border-explorer"); break;
       case "command.palette": setCmdPaletteOpen(true); break;
-      case "ui.escape": setCmdPaletteOpen(false); shortcutHelp.setOpen(false); break;
+      case "ui.escape": setCmdPaletteOpen(false); shortcutHelp.setOpen(false); setContextMenu(null); break;
       case "view.fullscreen": win.setFullscreen(true); break;
       case "win.minimize": win.minimize(); break;
       case "win.maximize": win.toggleMaximize(); break;
       case "win.close":    win.close(); break;
       case "trace.benchmark": await handleTestIPC(); break;
       case "view.report":
-      case "analysis.pdf": setActiveTab("report"); break;
-      case "view.memory": setActiveTab("memory"); break;
-      case "tools.extensions": setSidebarTab("extensions"); setSidebarVisible(true); break;
-      case "tools.uvm": setActiveTab("code"); break;
+      case "analysis.pdf": selectOrAddTab("report", "Report", "report"); break;
+      case "view.memory": selectOrAddTab("memory", "Memory", "memory"); break;
+      case "tools.extensions":
+        model.doAction(Actions.selectTab("border-extensions"));
+        break;
+      case "tools.uvm": selectOrAddTab("code", "Editor", "code"); break;
       case "tools.vcd":
         addMsg("system", "[Export VCD] Converting .pccx to IEEE 1364 VCD...");
         try {
@@ -223,16 +435,16 @@ function AppInner() {
         } catch (e) { addMsg("system", `Export failed: ${e}`); }
         break;
       case "file.openVcd": {
-        setActiveTab("waves");
+        selectOrAddTab("waves", "Waveform", "waves");
         await emit("pccx://open-vcd", undefined);
         break;
       }
       case "file.exit": win.close(); break;
       case "help.about":
-        addMsg("system", "pccx-lab v0.4.0 — NPU Architecture Profiler\nLicense: Apache 2.0\nModules: core · ui · ai_copilot · uvm_bridge");
+        addMsg("system", "pccx-lab v0.4.0 -- NPU Architecture Profiler\nLicense: Apache 2.0\nModules: core / ui / ai_copilot / uvm_bridge");
         break;
       case "help.shortcuts": shortcutHelp.setOpen(true); break;
-      default: addMsg("system", `[${action}] — Coming soon`);
+      default: addMsg("system", `[${action}] -- Coming soon`);
     }
   };
   handleMenuActionRef.current = handleMenuAction;
@@ -243,7 +455,7 @@ function AppInner() {
       const payload: Uint8Array = await invoke("fetch_trace_payload");
       const dt = performance.now() - t0;
       const count = payload.byteLength / 24;
-      addMsg("system", `[FAST] IPC: ${(payload.byteLength / 1024 / 1024).toFixed(2)} MB (${count.toLocaleString()} events) — ${dt.toFixed(1)} ms`);
+      addMsg("system", `[FAST] IPC: ${(payload.byteLength / 1024 / 1024).toFixed(2)} MB (${count.toLocaleString()} events) -- ${dt.toFixed(1)} ms`);
     } catch (e) { addMsg("system", `${t("copilot.ipcError")}: ${e}`); }
   };
 
@@ -268,7 +480,7 @@ function AppInner() {
           } catch { reply = t("copilot.uvmFailed"); }
         } else if (low.includes("report") || low.includes("보고서")) {
           reply = t("copilot.reportHint");
-          setActiveTab("report");
+          selectOrAddTab("report", "Report", "report");
         } else {
           reply = `${t("copilot.context")}: ${ctx || t("copilot.none")}\n\n${t("copilot.hintExamples")}`;
         }
@@ -300,7 +512,7 @@ function AppInner() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
-  // ── Tab Content ──────────────────────────────────────────────────────────
+  // ── Loading Skeleton ────────────────────────────────────────────────────
 
   const TraceLoadingSkeleton = () => (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, width: "100%", height: "100%" }}>
@@ -312,26 +524,6 @@ function AppInner() {
       ))}
     </div>
   );
-
-  function renderTabContent(id: ActiveTab) {
-    switch (id) {
-      case "timeline":   return <Timeline />;
-      case "flamegraph": return <FlameGraph />;
-      case "hardware":   return <HardwareVisualizer />;
-      case "memory":     return <MemoryDump />;
-      case "waves":      return <WaveformViewer />;
-      case "nodes":      return <NodeEditor />;
-      case "canvas":     return <CanvasView />;
-      case "code":       return <CodeEditor />;
-      case "cx":         return <CxPlayground />;
-      case "report":     return <ReportBuilder />;
-      case "extensions": return <ExtensionManager />;
-      case "verify":     return <VerificationSuite />;
-      case "roofline":   return <Roofline />;
-      case "scenario":   return <ScenarioFlow />;
-      case "tb_author":  return <TestbenchAuthor />;
-    }
-  }
 
   // ── Inspector Panel Renderers ────────────────────────────────────────────
 
@@ -386,12 +578,12 @@ function AppInner() {
             ["Cycles", header.trace.cycles?.toLocaleString()],
             ["Cores", header.trace.cores],
             ["Events", header.trace.events?.toLocaleString()],
-            ["Peak MAC Util", header.trace.peak_mac_util ? `${(header.trace.peak_mac_util * 100).toFixed(1)}%` : "—"],
-            ["Avg DMA BW", header.trace.avg_dma_bw ? `${(header.trace.avg_dma_bw * 100).toFixed(1)}%` : "—"],
+            ["Peak MAC Util", header.trace.peak_mac_util ? `${(header.trace.peak_mac_util * 100).toFixed(1)}%` : "--"],
+            ["Avg DMA BW", header.trace.avg_dma_bw ? `${(header.trace.avg_dma_bw * 100).toFixed(1)}%` : "--"],
           ] as [string, any][]).map(([label, val]) => (
             <div key={label} className="flex justify-between" style={{ padding: "4px 0", borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
               <span style={{ color: theme.textMuted }}>{label}</span>
-              <span style={{ color: theme.text, fontFamily: theme.fontMono }}>{val ?? "—"}</span>
+              <span style={{ color: theme.text, fontFamily: theme.fontMono }}>{val ?? "--"}</span>
             </div>
           ))}
         </div>
@@ -419,7 +611,7 @@ function AppInner() {
           <div key={label}>
             <div className="flex justify-between mb-1">
               <span style={{ color: theme.textMuted, fontSize: 10 }}>{label}</span>
-              <span style={{ color, fontSize: 10, fontFamily: theme.fontMono }}>—</span>
+              <span style={{ color, fontSize: 10, fontFamily: theme.fontMono }}>--</span>
             </div>
             <div style={{ height: 3, borderRadius: 2, background: theme.bgSurface }}>
               <div style={{ width: "0%", height: "100%", borderRadius: 2, background: color, transition: `width 0.3s ${theme.ease}` }} />
@@ -431,10 +623,416 @@ function AppInner() {
     </div>
   );
 
+  // ── Factory ─────────────────────────────────────────────────────────────
+
+  const factory = useCallback((node: TabNode) => {
+    const component = node.getComponent();
+    switch (component) {
+      case "timeline":   return <Suspense fallback={<TraceLoadingSkeleton />}><Timeline /></Suspense>;
+      case "flamegraph": return <Suspense fallback={<TraceLoadingSkeleton />}><FlameGraph /></Suspense>;
+      case "hardware":   return <Suspense fallback={<TraceLoadingSkeleton />}><HardwareVisualizer /></Suspense>;
+      case "memory":     return <Suspense fallback={<TraceLoadingSkeleton />}><MemoryDump /></Suspense>;
+      case "waves":      return <Suspense fallback={<TraceLoadingSkeleton />}><WaveformViewer /></Suspense>;
+      case "nodes":      return <Suspense fallback={<TraceLoadingSkeleton />}><NodeEditor /></Suspense>;
+      case "canvas":     return <Suspense fallback={<TraceLoadingSkeleton />}><CanvasView /></Suspense>;
+      case "code":       return <Suspense fallback={<TraceLoadingSkeleton />}><CodeEditor /></Suspense>;
+      case "cx":         return <Suspense fallback={<TraceLoadingSkeleton />}><CxPlayground /></Suspense>;
+      case "report":     return <Suspense fallback={<TraceLoadingSkeleton />}><ReportBuilder /></Suspense>;
+      case "extensions": return <Suspense fallback={<TraceLoadingSkeleton />}><ExtensionManager /></Suspense>;
+      case "verify":     return <Suspense fallback={<TraceLoadingSkeleton />}><VerificationSuite /></Suspense>;
+      case "roofline":   return <Suspense fallback={<TraceLoadingSkeleton />}><Roofline /></Suspense>;
+      case "scenario":   return <Suspense fallback={<TraceLoadingSkeleton />}><ScenarioFlow /></Suspense>;
+      case "tb_author":  return <Suspense fallback={<TraceLoadingSkeleton />}><TestbenchAuthor /></Suspense>;
+      case "occupancy":  return <Suspense fallback={<TraceLoadingSkeleton />}><OccupancyCalculator /></Suspense>;
+      case "metric_tree": return <Suspense fallback={<TraceLoadingSkeleton />}><MetricTree /></Suspense>;
+      case "pipeline":   return <Suspense fallback={<TraceLoadingSkeleton />}><PipelineDiagram /></Suspense>;
+
+      // Border panels: sidebar content
+      case "explorer":
+        return <FileTree root="" onFileOpen={handleSidebarFileOpen} />;
+      case "search":
+        return (
+          <div className="p-3">
+            <input placeholder="Search files..." className="w-full px-2 py-1 rounded text-xs outline-none"
+              style={{ background: theme.bgInput, color: theme.text, border: `0.5px solid ${theme.borderDim}` }} />
+            <p style={{ fontSize: 10, color: theme.textFaint, marginTop: 8 }}>Type to search across project files</p>
+          </div>
+        );
+      case "modules":
+        return (
+          <div className="p-3">
+            <p style={{ fontSize: 11, color: theme.textMuted }}>NPU module hierarchy</p>
+            <p style={{ fontSize: 10, color: theme.textFaint, marginTop: 4 }}>Open a project to see modules</p>
+          </div>
+        );
+      case "git":
+        return (
+          <div className="flex flex-col h-full">
+            <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
+              <GitBranch size={13} color={theme.accent} />
+              <span style={{ fontSize: 11, fontWeight: 600, color: theme.text }}>main</span>
+            </div>
+            <div className="px-3 py-2">
+              <textarea placeholder="Commit message..." rows={3} className="w-full rounded px-2 py-1 text-xs outline-none resize-none"
+                style={{ background: theme.bgInput, color: theme.text, border: `0.5px solid ${theme.borderDim}`, fontFamily: theme.fontMono }} />
+              <button className="w-full mt-2 py-1.5 rounded text-xs font-medium" style={{ background: theme.accent, color: "#fff", border: "none", cursor: "pointer" }}>
+                Commit
+              </button>
+            </div>
+            <div className="px-3 py-2">
+              <p style={{ fontSize: 10, color: theme.textFaint }}>Open a project folder to see changes</p>
+            </div>
+          </div>
+        );
+      case "verify-sidebar":
+        return <VerificationSuite />;
+      case "extensions-sidebar":
+        return <ExtensionManager />;
+
+      // Border panels: right inspector
+      case "copilot":   return renderCopilotContent();
+      case "stats":     return renderStatsContent();
+      case "telemetry": return renderTelemetryContent();
+
+      // Border panel: bottom
+      case "bottom-panel":
+        return <BottomPanel />;
+
+      default:
+        return <div style={{ padding: 16, color: theme.textMuted }}>Unknown panel: {component}</div>;
+    }
+  }, [theme, header, license, messages, inputText, apiKey, copilotBusy, traceLoaded]);
+
+  // ── Tab Rendering ───────────────────────────────────────────────────────
+
+  const tabIconMap: Record<string, React.ReactNode> = useMemo(() => ({
+    timeline:   <Clock size={11} />,
+    flamegraph: <Layers size={11} />,
+    hardware:   <Cpu size={11} />,
+    memory:     <Database size={11} />,
+    waves:      <ActivitySquare size={11} />,
+    nodes:      <Activity size={11} />,
+    canvas:     <Box size={11} />,
+    code:       <Code2 size={11} />,
+    cx:         <Terminal size={11} />,
+    report:     <FileText size={11} />,
+    extensions: <Settings2 size={11} />,
+    verify:     <Settings2 size={11} />,
+    roofline:   <PieChart size={11} />,
+    scenario:   <Zap size={11} />,
+    tb_author:  <LayoutDashboard size={11} />,
+    occupancy:  <Cpu size={11} />,
+    metric_tree: <BarChart3 size={11} />,
+    pipeline:   <Workflow size={11} />,
+    explorer:   <FolderTree size={11} />,
+    search:     <Search size={11} />,
+    modules:    <Blocks size={11} />,
+    git:        <GitBranch size={11} />,
+    copilot:    <BrainCircuit size={11} />,
+    stats:      <BarChart3 size={11} />,
+    telemetry:  <Radio size={11} />,
+    "bottom-panel": <Terminal size={11} />,
+    "verify-sidebar": <Settings2 size={11} />,
+    "extensions-sidebar": <Settings2 size={11} />,
+  }), []);
+
+  const onRenderTab = useCallback((node: TabNode, renderValues: ITabRenderValues) => {
+    const comp = node.getComponent() || "";
+    const icon = tabIconMap[comp];
+    if (icon) {
+      renderValues.leading = <span style={{ display: "flex", alignItems: "center", marginRight: 4 }}>{icon}</span>;
+    }
+  }, [tabIconMap]);
+
+  // ── Context Menu ────────────────────────────────────────────────────────
+
+  const handleContextMenu = useCallback((node: any, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (node.getType() !== "tab") return;
+    const nodeId = node.getId();
+    setContextMenu({ x: event.clientX, y: event.clientY, nodeId });
+  }, []);
+
+  const contextMenuItems = useMemo(() => {
+    if (!contextMenu) return [];
+    const nodeId = contextMenu.nodeId;
+    const node = model.getNodeById(nodeId);
+    if (!node) return [];
+    const parent = node.getParent();
+    const parentId = parent?.getId();
+
+    const isMaximized = parent && parent.getType() === "tabset" && model.getMaximizedTabset()?.getId() === parentId;
+
+    return [
+      {
+        label: "Close",
+        icon: <X size={13} />,
+        onClick: () => model.doAction(Actions.deleteTab(nodeId)),
+      },
+      {
+        label: "Close Others",
+        icon: <XCircle size={13} />,
+        onClick: () => {
+          if (!parent) return;
+          const children = parent.getChildren();
+          children.forEach((child: any) => {
+            if (child.getId() !== nodeId && child.getType() === "tab") {
+              model.doAction(Actions.deleteTab(child.getId()));
+            }
+          });
+        },
+      },
+      ...(parentId ? [{
+        label: isMaximized ? "Restore" : "Maximize",
+        icon: isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />,
+        separator: true,
+        onClick: () => model.doAction(Actions.maximizeToggle(parentId)),
+      }] : []),
+      {
+        label: "Detach to Window",
+        icon: <ExternalLink size={13} />,
+        separator: !parentId,
+        onClick: () => {
+          try {
+            model.doAction(Actions.popoutTab(nodeId, "float"));
+          } catch {
+            // fallback: float type if window type fails in Tauri
+          }
+        },
+      },
+      {
+        label: "Split Right",
+        icon: <SplitSquareHorizontal size={13} />,
+        separator: true,
+        onClick: () => {
+          if (!parentId) return;
+          if (node.getType() !== "tab") return;
+          model.doAction(Actions.moveNode(nodeId, parentId, DockLocation.RIGHT, -1, true));
+        },
+      },
+      {
+        label: "Split Down",
+        icon: <SplitSquareVertical size={13} />,
+        onClick: () => {
+          if (!parentId) return;
+          if (node.getType() !== "tab") return;
+          model.doAction(Actions.moveNode(nodeId, parentId, DockLocation.BOTTOM, -1, true));
+        },
+      },
+    ];
+  }, [contextMenu, model]);
+
+  // ── FlexLayout CSS Overrides (inline style element) ─────────────────────
+
+  const layoutStyles = useMemo(() => `
+    .flexlayout__layout {
+      --color-text: ${theme.text};
+      --color-background: ${theme.bg};
+      --color-base: ${theme.bg};
+      --color-1: ${theme.bgPanel};
+      --color-2: ${theme.bgPanel};
+      --color-3: ${theme.bgSurface};
+      --color-4: ${theme.border};
+      --color-5: ${theme.bgHover};
+      --color-6: ${theme.bgHover};
+      --color-drag1: ${theme.accent};
+      --color-drag2: ${theme.success};
+      --color-drag1-background: ${theme.accentBg};
+      --color-drag2-background: ${theme.successBg};
+      --font-size: 11px;
+      --font-family: ${theme.fontSans};
+      --font-weight: normal;
+      --splitter-size: 3px;
+      --splitter-active-size: 5px;
+      --splitter-handle-visibility: hidden;
+      --color-overflow: ${theme.textMuted};
+      --color-icon: ${theme.textMuted};
+      --color-tabset-background: ${theme.bgPanel};
+      --color-tabset-background-selected: ${theme.bgPanel};
+      --color-tabset-background-maximized: ${theme.bgPanel};
+      --color-tabset-divider-line: ${theme.borderSubtle};
+      --color-border-tab-content: ${theme.bg};
+      --color-border-background: ${theme.bgPanel};
+      --color-border-divider-line: ${theme.borderSubtle};
+      --color-tab-content: ${theme.bg};
+      --color-tab-selected: ${theme.text};
+      --color-tab-selected-background: ${theme.bgGlassHover};
+      --color-tab-unselected: ${theme.textMuted};
+      --color-tab-unselected-background: transparent;
+      --color-tab-textbox: ${theme.text};
+      --color-tab-textbox-background: ${theme.bgInput};
+      --color-border-tab-selected: ${theme.text};
+      --color-border-tab-selected-background: ${theme.bgGlassHover};
+      --color-border-tab-unselected: ${theme.textMuted};
+      --color-border-tab-unselected-background: transparent;
+      --color-splitter: transparent;
+      --color-splitter-hover: ${theme.accent};
+      --color-splitter-drag: ${theme.accent};
+      --color-splitter-handle: transparent;
+      --color-drag-rect-border: ${theme.accent};
+      --color-drag-rect-background: ${theme.accentBg};
+      --color-drag-rect: ${theme.text};
+      --color-popup-border: ${theme.border};
+      --color-popup-unselected: ${theme.text};
+      --color-popup-unselected-background: ${theme.bgSurface};
+      --color-popup-selected: ${theme.text};
+      --color-popup-selected-background: ${theme.bgGlassHover};
+    }
+    .flexlayout__layout {
+      background: ${theme.bg};
+      font-family: ${theme.fontSans};
+    }
+    .flexlayout__tab {
+      background: ${theme.bg};
+      overflow: hidden;
+    }
+    .flexlayout__tab_button {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      margin: 2px 1px;
+    }
+    .flexlayout__tab_button--selected {
+      background: ${theme.bgGlassHover};
+    }
+    .flexlayout__tab_button_leading {
+      display: flex;
+      align-items: center;
+    }
+    .flexlayout__tab_button_content {
+      font-size: 11px;
+    }
+    .flexlayout__tabset_tabbar_outer {
+      background: ${theme.bgPanel};
+      border-bottom: 0.5px solid ${theme.borderSubtle};
+    }
+    .flexlayout__tabset-selected {
+      background: ${theme.bg};
+    }
+    .flexlayout__splitter {
+      background: transparent;
+      transition: background 0.15s ${theme.ease};
+    }
+    .flexlayout__splitter:hover,
+    .flexlayout__splitter_drag {
+      background: ${theme.accent} !important;
+    }
+    .flexlayout__border {
+      background: ${theme.bgPanel};
+    }
+    .flexlayout__border_button {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin: 2px 1px;
+    }
+    .flexlayout__border_button--selected {
+      background: ${theme.bgGlassHover};
+      color: ${theme.text};
+    }
+    .flexlayout__border_button--unselected {
+      color: ${theme.textMuted};
+    }
+    .flexlayout__border_tab_contents {
+      background: ${theme.bg};
+    }
+    .flexlayout__border_inner_tab_container_left,
+    .flexlayout__border_inner_tab_container_right,
+    .flexlayout__border_inner_tab_container_bottom {
+      border-color: ${theme.borderSubtle};
+    }
+    .flexlayout__border_inner_left,
+    .flexlayout__border_inner_right {
+      border-right: 0.5px solid ${theme.borderSubtle};
+      border-left: 0.5px solid ${theme.borderSubtle};
+    }
+    .flexlayout__border_inner_bottom {
+      border-top: 0.5px solid ${theme.borderSubtle};
+    }
+    .flexlayout__drag_rect {
+      border-radius: 6px;
+      font-size: 11px;
+    }
+    .flexlayout__edge_rect {
+      background: ${theme.accentBg};
+      border: 1px solid ${theme.accent};
+      border-radius: 4px;
+    }
+    .flexlayout__outline_rect {
+      border: 2px solid ${theme.accent};
+      border-radius: 4px;
+    }
+    .flexlayout__popup_menu {
+      background: ${theme.bgSurface};
+      border: 1px solid ${theme.border};
+      border-radius: 8px;
+      box-shadow: ${theme.shadowMd};
+      padding: 4px 0;
+    }
+    .flexlayout__popup_menu_item {
+      padding: 4px 12px;
+      font-size: 12px;
+      border-radius: 4px;
+      margin: 0 4px;
+    }
+    .flexlayout__popup_menu_item--selected {
+      background: ${theme.bgGlassHover};
+    }
+    .flexlayout__tab_toolbar_button {
+      color: ${theme.textMuted};
+      border-radius: 4px;
+      padding: 2px;
+    }
+    .flexlayout__tab_toolbar_button:hover {
+      color: ${theme.text};
+      background: ${theme.bgGlassHover};
+    }
+    .flexlayout__tab_toolbar_button-close:hover {
+      color: ${theme.error};
+    }
+    .flexlayout__border_toolbar_button {
+      color: ${theme.textMuted};
+    }
+    .flexlayout__border_toolbar_button:hover {
+      color: ${theme.text};
+    }
+    .flexlayout__float_window {
+      background: ${theme.bgPanel};
+      border: 1px solid ${theme.border};
+      border-radius: 8px;
+      box-shadow: ${theme.shadowMd};
+    }
+    .flexlayout__float_window_header {
+      background: ${theme.bgSurface};
+      border-bottom: 1px solid ${theme.borderSubtle};
+      border-radius: 8px 8px 0 0;
+    }
+  `, [theme]);
+
+  // ── Activity Bar ────────────────────────────────────────────────────────
+
+  // Map sidebar items to border tab IDs
+  const SIDEBAR_BORDER_MAP: Record<SidebarTab, string> = {
+    files: "border-explorer",
+    search: "border-search",
+    modules: "border-modules",
+    git: "border-git",
+    verify: "border-verify",
+    extensions: "border-extensions",
+  };
+
+  const isBorderTabSelected = useCallback((borderTabId: string): boolean => {
+    const node = model.getNodeById(borderTabId);
+    if (!node) return false;
+    return (node as TabNode).isSelected();
+  }, [model]);
+
   // ── Layout ───────────────────────────────────────────────────────────────
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden select-none" style={{ background: theme.bg, color: theme.text }}>
+      <style>{layoutStyles}</style>
       <CommandPalette open={cmdPaletteOpen} setOpen={setCmdPaletteOpen} onAction={handleMenuAction} />
       <ShortcutHelp open={shortcutHelp.open} onClose={() => shortcutHelp.setOpen(false)} />
 
@@ -453,13 +1051,11 @@ function AppInner() {
           borderRight: `0.5px solid ${theme.borderSubtle}`,
         }}>
           {SIDEBAR_ITEMS.map(item => {
-            const isActive = sidebarVisible && sidebarTab === item.id;
+            const borderTabId = SIDEBAR_BORDER_MAP[item.id];
+            const isActive = isBorderTabSelected(borderTabId);
             return (
               <button key={item.id} title={item.label}
-                onClick={() => {
-                  if (sidebarTab === item.id) setSidebarVisible(v => !v);
-                  else { setSidebarTab(item.id); setSidebarVisible(true); }
-                }}
+                onClick={() => toggleBorderTab(borderTabId)}
                 style={{
                   padding: 7, borderRadius: 6, cursor: "pointer", border: "none",
                   background: isActive ? theme.bgGlassHover : "transparent",
@@ -472,189 +1068,38 @@ function AppInner() {
           })}
         </div>
 
-        <Group orientation="horizontal" className="flex-1">
-          {/* Sidebar */}
-          {sidebarVisible && (
-            <>
-              <Panel defaultSize={15} minSize={10}>
-                <div className="flex flex-col h-full" style={{
-                  background: theme.bgPanel,
-                  borderRight: `0.5px solid ${theme.borderSubtle}`,
-                }}>
-                  <div className="flex items-center px-3 shrink-0" style={{
-                    height: 30,
-                    borderBottom: `0.5px solid ${theme.borderSubtle}`,
-                  }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                      {SIDEBAR_ITEMS.find(s => s.id === sidebarTab)?.label}
-                    </span>
-                  </div>
-                  <div className="flex-1 overflow-y-auto min-h-0">
-                    {sidebarTab === "files" && <FileTree root="" onFileOpen={handleSidebarFileOpen} />}
-                    {sidebarTab === "search" && (
-                      <div className="p-3">
-                        <input placeholder="Search files..." className="w-full px-2 py-1 rounded text-xs outline-none"
-                          style={{ background: theme.bgInput, color: theme.text, border: `0.5px solid ${theme.borderDim}` }} />
-                        <p style={{ fontSize: 10, color: theme.textFaint, marginTop: 8 }}>Type to search across project files</p>
-                      </div>
-                    )}
-                    {sidebarTab === "modules" && (
-                      <div className="p-3">
-                        <p style={{ fontSize: 11, color: theme.textMuted }}>NPU module hierarchy</p>
-                        <p style={{ fontSize: 10, color: theme.textFaint, marginTop: 4 }}>Open a project to see modules</p>
-                      </div>
-                    )}
-                    {sidebarTab === "git" && (
-                      <div className="flex flex-col h-full">
-                        <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
-                          <GitBranch size={13} color={theme.accent} />
-                          <span style={{ fontSize: 11, fontWeight: 600, color: theme.text }}>main</span>
-                        </div>
-                        <div className="px-3 py-2">
-                          <textarea placeholder="Commit message..." rows={3} className="w-full rounded px-2 py-1 text-xs outline-none resize-none"
-                            style={{ background: theme.bgInput, color: theme.text, border: `0.5px solid ${theme.borderDim}`, fontFamily: theme.fontMono }} />
-                          <button className="w-full mt-2 py-1.5 rounded text-xs font-medium" style={{ background: theme.accent, color: "#fff", border: "none", cursor: "pointer" }}>
-                            Commit
-                          </button>
-                        </div>
-                        <div className="px-3 py-2">
-                          <p style={{ fontSize: 10, color: theme.textFaint }}>Open a project folder to see changes</p>
-                        </div>
-                      </div>
-                    )}
-                    {sidebarTab === "verify" && <VerificationSuite />}
-                    {sidebarTab === "extensions" && <ExtensionManager />}
-                  </div>
-                </div>
-              </Panel>
-              <ResizeHandle />
-            </>
-          )}
-
-          {/* Center panel */}
-          <Panel defaultSize={65} minSize={25}>
-            <Group orientation="vertical">
-              {/* Main content */}
-              <Panel defaultSize={bottomVisible ? 70 : 100} minSize={20}>
-                <div className="w-full h-full flex flex-col min-w-0 min-h-0" style={{ background: theme.bg }}>
-                  {/* Tab bar */}
-                  <div className="flex items-center shrink-0 px-1" style={{
-                    height: 34,
-                    borderBottom: `0.5px solid ${theme.borderSubtle}`,
-                    background: theme.bgPanel,
-                  }}>
-                    <div className="flex items-center gap-px py-1 px-0.5 hide-scrollbar overflow-x-auto" style={{
-                      background: theme.bgGlass,
-                      borderRadius: 8,
-                      border: `0.5px solid ${theme.borderSubtle}`,
-                    }}>
-                      {TABS.map(tab => {
-                        const isActive = activeTab === tab.id;
-                        return (
-                          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                            title={tab.label}
-                            className="flex items-center gap-1.5 shrink-0"
-                            style={{
-                              fontSize: 11, fontWeight: isActive ? 600 : 400,
-                              color: isActive ? theme.text : theme.textFaint,
-                              padding: isActive ? "4px 10px" : "4px 7px",
-                              borderRadius: 6,
-                              background: isActive ? theme.bgGlassHover : "transparent",
-                              cursor: "pointer", border: "none",
-                              transition: `all 0.15s ${theme.ease}`,
-                              letterSpacing: -0.2,
-                            }}>
-                            {tab.icon}
-                            {isActive && <span>{tab.label}</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Tab content */}
-                  <div className="flex-1 overflow-hidden relative">
-                    {TABS.map(tab => (
-                      <div key={tab.id} style={{
-                        display: activeTab === tab.id ? "flex" : "none",
-                        flexDirection: "column", width: "100%", height: "100%",
-                      }}>
-                        {visitedTabs.has(tab.id) ? (
-                          <Suspense fallback={<TraceLoadingSkeleton />}>
-                            {renderTabContent(tab.id)}
-                          </Suspense>
-                        ) : <TraceLoadingSkeleton />}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </Panel>
-
-              {/* Bottom panel */}
-              {bottomVisible && (
-                <>
-                  <ResizeHandle direction="vertical" />
-                  <Panel defaultSize={30} minSize={8}>
-                    <BottomPanel onClose={() => setBottomVisible(false)} />
-                  </Panel>
-                </>
-              )}
-            </Group>
-          </Panel>
-
-          {/* Inspector panel (right) */}
-          {inspectorVisible && (
-            <>
-              <ResizeHandle />
-              <Panel defaultSize={20} minSize={12}>
-                <div className="w-full h-full flex flex-col min-w-0 min-h-0" style={{ background: theme.bgPanel }}>
-                  {/* Inspector tab bar */}
-                  <div className="flex items-center shrink-0 px-2" style={{
-                    height: 30,
-                    borderBottom: `0.5px solid ${theme.borderSubtle}`,
-                  }}>
-                    <div className="flex items-center gap-0.5 flex-1">
-                      {INSPECTOR_TABS.map(tab => {
-                        const isActive = inspectorTab === tab.id;
-                        return (
-                          <button key={tab.id} onClick={() => setInspectorTab(tab.id)}
-                            className="flex items-center gap-1"
-                            style={{
-                              fontSize: 10, fontWeight: isActive ? 600 : 400,
-                              color: isActive ? theme.text : theme.textMuted,
-                              padding: "3px 8px", borderRadius: 5,
-                              background: isActive ? theme.bgGlassHover : "transparent",
-                              border: "none", cursor: "pointer",
-                              transition: `all 0.12s ${theme.ease}`,
-                            }}>
-                            {tab.icon}
-                            <span>{tab.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <button onClick={() => setInspectorVisible(false)} title="Close"
-                      style={{ padding: 3, borderRadius: 4, border: "none", cursor: "pointer", background: "transparent", color: theme.textMuted }}
-                      onMouseEnter={e => e.currentTarget.style.color = theme.text}
-                      onMouseLeave={e => e.currentTarget.style.color = theme.textMuted}>
-                      <X size={12} />
-                    </button>
-                  </div>
-
-                  {/* Inspector content */}
-                  <div className="flex-1 overflow-hidden min-h-0">
-                    {inspectorTab === "copilot" && renderCopilotContent()}
-                    {inspectorTab === "stats" && renderStatsContent()}
-                    {inspectorTab === "telemetry" && renderTelemetryContent()}
-                  </div>
-                </div>
-              </Panel>
-            </>
-          )}
-        </Group>
+        {/* Dock Layout */}
+        <div className="flex-1 relative">
+          <Layout
+            ref={layoutRef}
+            model={model}
+            factory={factory}
+            onModelChange={handleModelChange}
+            onAction={handleAction}
+            onRenderTab={onRenderTab}
+            onContextMenu={handleContextMenu as any}
+            realtimeResize={false}
+            icons={{
+              close: <X size={10} />,
+              maximize: <Maximize2 size={10} />,
+              restore: <Minimize2 size={10} />,
+              more: <MoreHorizontal size={10} />,
+              popout: <ExternalLink size={10} />,
+            }}
+          />
+        </div>
       </div>
 
-      <StatusBar traceLoaded={traceLoaded} totalCycles={header?.trace?.cycles} numCores={header?.trace?.cores} license={license} activeTab={activeTab} />
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenuItems}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      <StatusBar traceLoaded={traceLoaded} totalCycles={header?.trace?.cycles} numCores={header?.trace?.cores} license={license} activeTab={activeTabId} />
     </div>
   );
 }
