@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ChevronRight, ChevronDown, Code2, FileText, Folder,
-  Cog, FileCode2, Cpu, Binary, Braces, Hash, Terminal,
+  Cog, FileCode2, Binary, Braces, Hash, Terminal,
 } from "lucide-react";
 import { useTheme } from "./ThemeContext";
 
@@ -22,11 +22,10 @@ interface FileTreeProps {
 
 // ─── Extension icon mapping ─────────────────────────────────────────────────
 
-type IconKind = "hdl" | "cx" | "rust" | "toml" | "json" | "c_cpp" | "python" | "shell" | "config" | "generic";
+type IconKind = "hdl" | "rust" | "toml" | "json" | "c_cpp" | "python" | "shell" | "config" | "generic";
 
 const EXT_MAP: Record<string, IconKind> = {
   sv: "hdl", svh: "hdl", v: "hdl", vh: "hdl", vhd: "hdl", vhdl: "hdl",
-  cx: "cx",
   rs: "rust",
   toml: "toml", yaml: "config", yml: "config",
   json: "json", jsonc: "json",
@@ -52,7 +51,6 @@ interface FileIconProps { kind: IconKind; accent: string; muted: string; size?: 
 function FileIcon({ kind, accent, muted, size = 14 }: FileIconProps) {
   switch (kind) {
     case "hdl":    return <Code2 size={size} color={accent} />;
-    case "cx":     return <Cpu size={size} color="#e5a400" />;
     case "rust":   return <Cog size={size} color="#dea584" />;
     case "toml":   return <Braces size={size} color="#9cdcfe" />;
     case "json":   return <Braces size={size} color="#ce9178" />;

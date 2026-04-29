@@ -20,7 +20,6 @@ import { BottomPanel }       from "./BottomPanel";
 import { ShortcutHelp, useShortcutHelp } from "./useShortcuts";
 import { matchKeybinding } from "./keybindings";
 
-const CxPlayground      = lazy(() => import("./CxPlayground").then(m => ({ default: m.CxPlayground })));
 const CanvasView         = lazy(() => import("./CanvasView").then(m => ({ default: m.CanvasView })));
 const NodeEditor         = lazy(() => import("./NodeEditor").then(m => ({ default: m.NodeEditor })));
 const Timeline           = lazy(() => import("./Timeline").then(m => ({ default: m.Timeline })));
@@ -50,7 +49,7 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ActiveTab = "timeline" | "flamegraph" | "hardware" | "memory" | "waves" | "nodes" | "canvas" | "code" | "cx" | "report" | "extensions" | "verify" | "roofline" | "scenario" | "tb_author" | "occupancy" | "metric_tree" | "pipeline";
+type ActiveTab = "timeline" | "flamegraph" | "hardware" | "memory" | "waves" | "nodes" | "canvas" | "code" | "report" | "extensions" | "verify" | "roofline" | "scenario" | "tb_author" | "occupancy" | "metric_tree" | "pipeline";
 type SidebarTab = "files" | "search" | "modules" | "extensions" | "verify" | "git";
 interface ChatMessage { role: "system" | "user" | "ai"; content: string; }
 
@@ -361,7 +360,6 @@ function AppInner() {
     nodes:      { name: "Data Flow",   component: "nodes" },
     canvas:     { name: "3D View",     component: "canvas" },
     code:       { name: "Editor",      component: "code" },
-    cx:         { name: "CX",          component: "cx" },
     report:     { name: "Report",      component: "report" },
     extensions: { name: "Extensions",  component: "extensions" },
     verify:     { name: "Verify",      component: "verify" },
@@ -379,7 +377,7 @@ function AppInner() {
       "view.canvas": "canvas", "view.nodes": "nodes", "view.timeline": "timeline",
       "view.code": "code", "view.scenario": "scenario", "view.tb_author": "tb_author",
       "view.flamegraph": "flamegraph", "view.hardware": "hardware",
-      "view.waves": "waves", "view.cx": "cx",
+      "view.waves": "waves",
       "analysis.roofline": "roofline",
     };
     if (tabMap[action]) {
@@ -636,7 +634,6 @@ function AppInner() {
       case "nodes":      return <Suspense fallback={<TraceLoadingSkeleton />}><NodeEditor /></Suspense>;
       case "canvas":     return <Suspense fallback={<TraceLoadingSkeleton />}><CanvasView /></Suspense>;
       case "code":       return <Suspense fallback={<TraceLoadingSkeleton />}><CodeEditor /></Suspense>;
-      case "cx":         return <Suspense fallback={<TraceLoadingSkeleton />}><CxPlayground /></Suspense>;
       case "report":     return <Suspense fallback={<TraceLoadingSkeleton />}><ReportBuilder /></Suspense>;
       case "extensions": return <Suspense fallback={<TraceLoadingSkeleton />}><ExtensionManager /></Suspense>;
       case "verify":     return <Suspense fallback={<TraceLoadingSkeleton />}><VerificationSuite /></Suspense>;
@@ -714,7 +711,6 @@ function AppInner() {
     nodes:      <Activity size={11} />,
     canvas:     <Box size={11} />,
     code:       <Code2 size={11} />,
-    cx:         <Terminal size={11} />,
     report:     <FileText size={11} />,
     extensions: <Settings2 size={11} />,
     verify:     <Settings2 size={11} />,

@@ -7,7 +7,6 @@ members = [
     "crates/evolve",
     "crates/remote",
     "crates/lsp",
-    "crates/cx",
     "crates/schema",
     "crates/uvm_bridge",
     "crates/ai_copilot",
@@ -22,8 +21,8 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["hwkim-dev <54717101+hwkim-dev@users.noreply.github.com>"]
-repository = "https://github.com/hwkim-dev/pccx-lab"
+authors = ["hkimw <54717101+hkimw@users.noreply.github.com>"]
+repository = "https://github.com/hkimw/pccx-lab"
 license = "Apache-2.0"
 rust-version = "1.75"
 

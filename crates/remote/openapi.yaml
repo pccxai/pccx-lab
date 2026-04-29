@@ -24,8 +24,8 @@ info:
     the intended surface so the client tooling is buildable from day
     one.
   contact:
-    name: hwkim-dev
-    url: https://github.com/hwkim-dev/pccx-lab
+    name: hkimw
+    url: https://github.com/hkimw/pccx-lab
 
 servers:
   - url: https://{host}:{port}/v1

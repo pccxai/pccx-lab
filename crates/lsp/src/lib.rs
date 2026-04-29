@@ -24,7 +24,6 @@
 // request/response correlation, a concrete verible backend, and the
 // tower-lsp adapter that serves the stack to Monaco.
 
-pub mod cx_provider;
 pub mod isa_provider;
 pub mod monaco_bridge;
 pub mod sv_diagnostics;
@@ -101,9 +100,9 @@ pub struct Completion {
 pub enum CompletionSource {
     /// Came from an upstream language server (verible etc.).
     Lsp,
-    /// Came from a Claude-Haiku AI predictor.
+    /// Came from a fast cloud LLM predictor.
     AiFast,
-    /// Came from a Claude-Sonnet AI predictor (higher latency).
+    /// Came from a deep cloud LLM predictor (higher latency).
     AiDeep,
     /// Cached hit (keyed by AST hash).
     Cache,
@@ -140,7 +139,7 @@ pub struct Diagnostic {
 // can swap providers per-language per-query without a rebuild.
 
 /// Returns completion candidates at a source position.  The real
-/// implementations either (a) wrap an external LSP, (b) query Claude,
+/// implementations either (a) wrap an external LSP, (b) query the cloud LLM,
 /// or (c) hit an AST-hash cache.
 pub trait CompletionProvider {
     fn complete(

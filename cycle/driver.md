@@ -1,7 +1,7 @@
 # Cycle Driver — /loop prompt
 
 Use this as the `prompt` argument to `/loop` (dynamic pacing, no fixed
-interval). The driver Claude reads this, advances the loop by one
+interval). The driver reads this, advances the loop by one
 step, and schedules the next wake-up.
 
 ---

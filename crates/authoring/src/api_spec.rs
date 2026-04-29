@@ -271,7 +271,7 @@ impl ApiSpec {
         if let Some(c) = &self.citation {
             s.push_str(&format!(" * Research citation: {}\n", c));
         }
-        s.push_str(" * See https://hwkim-dev.github.io/pccx/ for the architecture spec.\n");
+        s.push_str(" * See https://hkimw.github.io/pccx/ for the architecture spec.\n");
         s.push_str(" */\n");
         s.push_str(&format!("#ifndef {}\n#define {}\n\n", guard, guard));
         s.push_str("#include <stdint.h>\n#include <stddef.h>\n#include <stdbool.h>\n\n");
@@ -357,7 +357,7 @@ impl ApiSpec {
         if let Some(c) = &self.citation {
             s.push_str(&format!("//! Research citation: {}\n", c));
         }
-        s.push_str("//! See https://hwkim-dev.github.io/pccx/ for the architecture spec.\n");
+        s.push_str("//! See https://hkimw.github.io/pccx/ for the architecture spec.\n");
         s.push_str("#![allow(non_camel_case_types, dead_code)]\n\n");
 
         for t in &self.types {
@@ -411,7 +411,7 @@ impl ApiSpec {
         s.push_str(&format!("\"\"\"Auto-generated from API spec `{}` ({}).  Do not edit.\n\n",
             self.name,
             if self.version.is_empty() { "unversioned" } else { &self.version }));
-        s.push_str("See https://hwkim-dev.github.io/pccx/ for the architecture spec.\n\"\"\"\n\n");
+        s.push_str("See https://hkimw.github.io/pccx/ for the architecture spec.\n\"\"\"\n\n");
         s.push_str("from __future__ import annotations\n");
         s.push_str("import ctypes\nfrom ctypes import c_int, c_uint, c_long, c_longlong, c_short\n");
         s.push_str("from ctypes import c_ubyte, c_ushort, c_uint32, c_uint64, c_int32, c_int64\n");

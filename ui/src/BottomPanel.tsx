@@ -62,7 +62,7 @@ export function BottomPanel({ dock = "bottom", onDockChange, onClose }: BottomPa
       { time: fmt(-60),  level: "info",  source: "trace",       msg: "Loaded tb_packer.pccx: 1024 MAC_COMPUTE events on core 0" },
       { time: fmt(-58),  level: "info",  source: "roofline",    msg: "AI=∞ (no DMA) · achieved 65536 GOPS · compute-bound" },
       { time: fmt(-40),  level: "ok",    source: "ipc",         msg: "detect_bottlenecks({window: 256, threshold: 0.5}) → 0 hotspots" },
-      { time: fmt(-20),  level: "info",  source: "ai_copilot",  msg: "Gemini bridge online · model=gemini-pro" },
+      { time: fmt(-20),  level: "info",  source: "ai_copilot",  msg: "cloud LLM bridge online · model=cloud-llm" },
       { time: fmt(-5),   level: "info",  source: "ui",          msg: "Rendered FlameGraph with 121 spans (Gemma 3N decode step)" },
       { time: fmt(0),    level: "ok",    source: "core",        msg: "Idle · waiting for next trace" },
     ];

@@ -1021,79 +1021,6 @@ fn generate_sv_docs(path: String) -> Result<String, String> {
     Ok(pccx_authoring::sv_parser::generate_module_docs(&result))
 }
 
-#[tauri::command]
-fn eval_cx(source: String) -> Result<serde_json::Value, String> {
-    match pccx_cx::run_detailed(&source) {
-        Ok(result) => serde_json::to_value(&result).map_err(|e| e.to_string()),
-        Err(e) => Err(e.to_string()),
-    }
-}
-
-// ─── CX LSP Commands ──────────────────────────────────────────────────────────
-
-/// Returns hover Markdown for the CX token at (line, col) in source.
-/// Returns None when the cursor is on whitespace or an unrecognised token.
-#[tauri::command]
-fn cx_hover(
-    source: String,
-    line: u32,
-    col: u32,
-) -> Result<Option<String>, String> {
-    Ok(pccx_lsp::cx_provider::cx_hover(
-        &source,
-        line as usize,
-        col as usize,
-    )
-    .map(|h| h.contents))
-}
-
-/// Returns a JSON array of completion items for the given CX source position.
-#[tauri::command]
-fn cx_complete(
-    source: String,
-    line: u32,
-    col: u32,
-) -> Result<String, String> {
-    let items = pccx_lsp::cx_provider::cx_completions(&source, line as usize, col as usize);
-    let json_items: Vec<serde_json::Value> = items
-        .into_iter()
-        .map(|c| serde_json::json!({
-            "label":      c.label,
-            "detail":     c.detail,
-            "insertText": c.insert_text,
-        }))
-        .collect();
-    serde_json::to_string(&json_items).map_err(|e| e.to_string())
-}
-
-/// Returns a JSON array of LSP diagnostics for the given CX source.
-/// Monaco uses these as model markers (squiggles).
-#[tauri::command]
-fn cx_diagnostics_cmd(source: String) -> Result<String, String> {
-    let diags = pccx_lsp::cx_provider::cx_diagnostics(&source);
-    let items: Vec<serde_json::Value> = diags
-        .iter()
-        .map(|d| {
-            let monaco_severity = match d.severity {
-                pccx_lsp::DiagnosticSeverity::Error       => 8,
-                pccx_lsp::DiagnosticSeverity::Warning     => 4,
-                pccx_lsp::DiagnosticSeverity::Information => 2,
-                pccx_lsp::DiagnosticSeverity::Hint        => 1,
-            };
-            serde_json::json!({
-                "startLineNumber": d.range.start.line + 1,
-                "startColumn":     d.range.start.character + 1,
-                "endLineNumber":   d.range.end.line + 1,
-                "endColumn":       d.range.end.character + 1,
-                "severity":        monaco_severity,
-                "message":         d.message,
-                "source":          d.source,
-            })
-        })
-        .collect();
-    serde_json::to_string(&items).map_err(|e| e.to_string())
-}
-
 // ─── Verification Commands ────────────────────────────────────────────────────
 
 /// Return type for `verify_sanitize` — named so the JSON keys are stable.
@@ -1331,10 +1258,6 @@ pub fn run() {
             generate_block_diagram,
             generate_fsm_diagram,
             generate_module_detail,
-            eval_cx,
-            cx_hover,
-            cx_complete,
-            cx_diagnostics_cmd,
             verify_sanitize,
             verify_golden_diff,
             verify_report,

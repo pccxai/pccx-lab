@@ -248,7 +248,7 @@ for contributor provenance — lighter touch matching MIT posture.
 (1) Does the roadmap foresee any proprietary modules, or is
 open-core purely aspirational? If the latter, document as
 "entirely MIT, no closed core planned."
-(2) AGPL for a Gemini-proxy sidecar (if added) vs keeping the
+(2) AGPL for a cloud-LLM-proxy sidecar (if added) vs keeping the
 sidecar closed — Riehle 2012 suggests the latter monetises.
 (3) CLA vs DCO — is the pccx-lab contributor base small enough
 to adopt DCO per https://developercertificate.org/?

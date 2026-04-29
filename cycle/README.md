@@ -41,7 +41,7 @@ can grade *progress* as well as absolute quality.
 ## Driver
 
 `cycle/driver.md` is meant to be fed to `/loop` (dynamic pacing). It
-tells the orchestrator Claude which round to run next, where the
+tells the orchestrator which round to run next, where the
 prior artefacts live, and when the loop should halt.
 
 ## Round index

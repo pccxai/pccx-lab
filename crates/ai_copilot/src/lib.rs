@@ -88,8 +88,8 @@ pub fn get_available_extensions() -> Vec<Extension> {
         // ─── Cloud Bridges ────────────────────────────────────────────────────
         Extension {
             id:           "gemini-cloud-bridge".to_string(),
-            name:         "Gemini Pro Cloud Bridge".to_string(),
-            description:  "Lightweight API bridge to Gemini Pro. Requires outbound HTTPS access.".to_string(),
+            name:         "Cloud LLM Bridge".to_string(),
+            description:  "Lightweight API bridge to cloud LLM. Requires outbound HTTPS access.".to_string(),
             size_mb:      2,
             is_installed: true,
             category:     ExtensionCategory::CloudBridge,
@@ -97,8 +97,8 @@ pub fn get_available_extensions() -> Vec<Extension> {
         },
         Extension {
             id:           "claude-cloud-bridge".to_string(),
-            name:         "Claude Sonnet Cloud Bridge".to_string(),
-            description:  "API bridge to Anthropic Claude Sonnet for superior code/SV generation.".to_string(),
+            name:         "Deep Cloud LLM Bridge".to_string(),
+            description:  "API bridge to a managed deep cloud LLM for superior code/SV generation.".to_string(),
             size_mb:      2,
             is_installed: false,
             category:     ExtensionCategory::CloudBridge,
@@ -283,8 +283,8 @@ pub trait ContextCompressor {
 
 /// Runs a single subagent task with the given prompt and context,
 /// returning the subagent's reply or a propagated error.
-/// Used by pccx-ide / pccx-remote to drive log-grinder, research-scout,
-/// doc-drafter patterns in parallel.
+/// Used by pccx-ide / pccx-remote to drive log analysis, research,
+/// doc drafting patterns in parallel.
 pub trait SubagentRunner {
     fn run(&self, task: &str, context: &str) -> anyhow::Result<String>;
     fn name(&self) -> &'static str;

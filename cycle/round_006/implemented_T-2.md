@@ -3,7 +3,7 @@
 ## Ticket T-2: Roofline 2.0 — heatmap, kernel bands, dual-workload overlay
 
 - **Commit:** `5d3eb43` — `feat(ui): T-2 Roofline 2.0 — heatmap, kernel bands, dual-workload overlay`
-- **Author:** `hwkim-dev <54717101+hwkim-dev@users.noreply.github.com>` (no bot attribution; pre-push hook compliant)
+- **Author:** `hkimw <54717101+hkimw@users.noreply.github.com>` (no bot attribution; pre-push hook compliant)
 - **Files changed (git show --stat 5d3eb43):**
   ```
   src/core/src/lib.rs         |   2 +-

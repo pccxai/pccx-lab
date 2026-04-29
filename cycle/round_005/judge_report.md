@@ -192,7 +192,7 @@ core emitter (R3 Top-5 item). (5) SynthStatusCard adoption of
 5. **`LICENSE_SCOPE.md` — draw the open-core boundary.**
    Four rounds stale. Write a ≤ 200-line doc covering: (a) MIT
    scope (core, parsers, UI shell, test fixtures), (b) proprietary-
-   candidate scope if any (AI copilot bridge, any Gemini-specific
+   candidate scope if any (AI copilot bridge, any cloud-specific
    code), (c) contributor license contract. **Accept**:
    `ls LICENSE_SCOPE.md` exists; doc references root `LICENSE` +
    enumerates at least 5 modules with their licensing disposition.

@@ -11,14 +11,13 @@ rust-version.workspace = true
 #
 # The final shape multiplexes over external LSP servers (verible for SV,
 # rust-analyzer, clangd, pylsp) plus an AI-driven completion / hover /
-# explanation layer backed by Claude Haiku+Sonnet.  This crate ships
+# explanation layer backed by fast and deep cloud LLMs.  This crate ships
 # only traits + wiring types today; concrete backends land during
 # Phase 2 proper (Weeks 6-9).
 
 [dependencies]
 pccx-core = { path = "../core" }
 pccx-authoring = { path = "../authoring" }
-pccx-cx = { path = "../cx" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

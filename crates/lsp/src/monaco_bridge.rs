@@ -16,7 +16,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::cx_provider;
 use crate::sv_diagnostics::SvDiagnosticsProvider;
 use crate::sv_hover::SvHoverProvider;
 use crate::sv_provider::SvKeywordProvider;
@@ -350,71 +349,6 @@ impl MonacoBridge {
         serde_json::to_string(&notification).unwrap_or_default()
     }
 
-    // ─── CX handlers ───────────────────────────────────────────────────────
-
-    /// Returns hover Markdown for the CX token at `(line, col)` in `source`.
-    /// Returns `None` when the cursor is on whitespace or an unrecognised symbol.
-    pub fn handle_cx_hover(
-        &self,
-        source: &str,
-        line: usize,
-        col: usize,
-    ) -> Option<String> {
-        cx_provider::cx_hover(source, line, col).map(|h| h.contents)
-    }
-
-    /// Returns a JSON array of completion items for the CX cursor position.
-    pub fn handle_cx_completion(
-        &self,
-        source: &str,
-        line: usize,
-        col: usize,
-    ) -> String {
-        let items = cx_provider::cx_completions(source, line, col);
-        let json_items: Vec<serde_json::Value> = items
-            .into_iter()
-            .map(|c| serde_json::json!({
-                "label":       c.label,
-                "detail":      c.detail,
-                "insertText":  c.insert_text,
-            }))
-            .collect();
-        serde_json::to_string(&json_items).unwrap_or_else(|_| "[]".to_string())
-    }
-
-    /// Returns a JSON array of LSP diagnostic objects for the CX source.
-    pub fn publish_cx_diagnostics(&self, source: &str) -> String {
-        let diags = cx_provider::cx_diagnostics(source);
-        let lsp_diags: Vec<LspDiagnostic> = diags
-            .into_iter()
-            .map(|d| LspDiagnostic {
-                range: LspRange {
-                    start: LspPosition {
-                        line:      d.range.start.line,
-                        character: d.range.start.character,
-                    },
-                    end: LspPosition {
-                        line:      d.range.end.line,
-                        character: d.range.end.character,
-                    },
-                },
-                severity: d.severity as u32,
-                message:  d.message,
-                source:   d.source,
-            })
-            .collect();
-
-        let notification = JsonRpcNotification {
-            jsonrpc: "2.0",
-            method:  "textDocument/publishDiagnostics",
-            params:  serde_json::json!({
-                "uri":         "cx:///playground",
-                "diagnostics": serde_json::to_value(&lsp_diags).unwrap_or_default(),
-            }),
-        };
-
-        serde_json::to_string(&notification).unwrap_or_default()
-    }
 }
 
 impl Default for MonacoBridge {
