@@ -25,7 +25,7 @@ info:
     one.
   contact:
     name: hkimw
-    url: https://github.com/hkimw/pccx-lab
+    url: https://github.com/pccxai/pccx-lab
 
 servers:
   - url: https://{host}:{port}/v1

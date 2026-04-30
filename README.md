@@ -9,11 +9,11 @@ Pre-RTL bottleneck detection, UVM co-simulation, and LLM-driven testbench genera
 
 ## Full documentation
 Documentation is available in both English and Korean:
-- **English:** [https://hkimw.github.io/pccx/en/lab/](https://hkimw.github.io/pccx/en/lab/)
-- **Korean:** [https://hkimw.github.io/pccx/ko/lab/](https://hkimw.github.io/pccx/ko/lab/)
+- **English:** [https://pccxai.github.io/pccx/en/lab/](https://pccxai.github.io/pccx/en/lab/)
+- **Korean:** [https://pccxai.github.io/pccx/ko/lab/](https://pccxai.github.io/pccx/ko/lab/)
 
 ## Why one repo, not five?
-Read our [design rationale](https://hkimw.github.io/pccx/en/lab/design/rationale.html) on why we use a single monorepo to maintain strong module boundaries.
+Read our [design rationale](https://pccxai.github.io/pccx/en/lab/design/rationale.html) on why we use a single monorepo to maintain strong module boundaries.
 
 ## Module layout
 Phase 1 split the original monolithic `core` into nine focused crates under `crates/` plus a top-level `ui/`.  `pccx-core` is the single sink of the dependency graph; no crate depends on `pccx-ide` or `pccx-remote` (both are terminal binaries).
@@ -33,12 +33,12 @@ Phase 1 split the original monolithic `core` into nine focused crates under `cra
 See [docs/design/phase1_crate_split.md](docs/design/phase1_crate_split.md) for the full dependency graph and per-crate rationale.
 
 ## .pccx file format
-Read the open specification for our [`.pccx` binary session format](https://hkimw.github.io/pccx/en/lab/pccx-format.html).
+Read the open specification for our [`.pccx` binary session format](https://pccxai.github.io/pccx/en/lab/pccx-format.html).
 
 ## Part of the pccx ecosystem
-- [pccx (docs)](https://github.com/hkimw/pccx) — NPU architecture reference
-- [pccx-FPGA-NPU-LLM-kv260 (RTL)](https://github.com/hkimw/pccx-FPGA-NPU-LLM-kv260) — RTL implementation
-- [pccx-lab (this)](https://github.com/hkimw/pccx-lab) — Performance profiler & simulator
+- [pccx (docs)](https://github.com/pccxai/pccx) — NPU architecture reference
+- [pccx-FPGA-NPU-LLM-kv260 (RTL)](https://github.com/pccxai/pccx-FPGA-NPU-LLM-kv260) — RTL implementation
+- [pccx-lab (this)](https://github.com/pccxai/pccx-lab) — Performance profiler & simulator
 
 ## License
 Apache 2.0 License.

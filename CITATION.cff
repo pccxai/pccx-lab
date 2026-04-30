@@ -7,8 +7,8 @@ abstract: >-
   FPGA-oriented LLM inference accelerator stack.
 type: software
 license: Apache-2.0
-repository-code: "https://github.com/hkimw/pccx-lab"
-url: "https://hkimw.github.io/pccx/en/lab/"
+repository-code: "https://github.com/pccxai/pccx-lab"
+url: "https://pccxai.github.io/pccx/en/lab/"
 authors:
   - family-names: Kim
     given-names: Hyunwoo
@@ -19,7 +19,7 @@ authors:
 references:
   - type: software
     title: "pccx — open FPGA-oriented LLM inference accelerator"
-    repository-code: "https://github.com/hkimw/pccx"
+    repository-code: "https://github.com/pccxai/pccx"
     notes: "Canonical architecture and ISA that this tooling targets."
 keywords:
   - FPGA

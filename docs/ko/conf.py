@@ -7,7 +7,7 @@ copyright = "2026, hwkim"
 author = "hwkim"
 
 language = "ko"
-html_baseurl = "https://hkimw.github.io/pccx/ko/lab/"
+html_baseurl = "https://pccxai.github.io/pccx/ko/lab/"
 
 extensions = [
     "myst_parser",
@@ -17,7 +17,7 @@ extensions = [
 
 html_theme = "furo"
 html_theme_options = {
-    "announcement": "Part of the pccx ecosystem — <a href='https://hkimw.github.io/pccx/ko/'>pccx main docs</a>",
+    "announcement": "Part of the pccx ecosystem — <a href='https://pccxai.github.io/pccx/ko/'>pccx main docs</a>",
 }
 
 html_static_path = []

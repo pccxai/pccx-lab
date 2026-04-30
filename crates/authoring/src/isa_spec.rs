@@ -218,7 +218,7 @@ impl IsaSpec {
         if let Some(cit) = &self.citation {
             s.push_str(&format!("// Research citation: {}\n", cit));
         }
-        s.push_str(&format!("// See https://hkimw.github.io/pccx/ for the architecture spec.\n\n"));
+        s.push_str(&format!("// See https://pccxai.github.io/pccx/ for the architecture spec.\n\n"));
         s.push_str("#![allow(clippy::identity_op)]\n\n");
         for op in &self.opcodes {
             s.push_str(&format!("/// Encode a `{}` instruction.", op.name));
@@ -265,7 +265,7 @@ impl IsaSpec {
         if let Some(cit) = &self.citation {
             s.push_str(&format!("// Research citation: {}\n", cit));
         }
-        s.push_str(&format!("// See https://hkimw.github.io/pccx/ for the architecture spec.\n\n"));
+        s.push_str(&format!("// See https://pccxai.github.io/pccx/ for the architecture spec.\n\n"));
         s.push_str(&format!("package {};\n\n", pkg));
         // Opcode enum.
         s.push_str("    typedef enum logic [");

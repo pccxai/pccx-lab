@@ -91,7 +91,7 @@ Always pass `--prerelease` to `gh release create` for these tags.
 
 Each tag must keep `CITATION.cff` consistent with the released
 authors and metadata.  The canonical project citation lives in
-[`pccx/CITATION.cff`](https://github.com/hkimw/pccx/blob/main/CITATION.cff);
+[`pccx/CITATION.cff`](https://github.com/pccxai/pccx/blob/main/CITATION.cff);
 this repo's `CITATION.cff` references that canonical entry under
 `references:` so external citations land on the architecture, not
 the tooling.
@@ -104,8 +104,8 @@ When a `[X.Y.Z]` cut goes in:
 
 ## See also
 
-- [`pccx-FPGA-NPU-LLM-kv260` `RELEASING.md`](https://github.com/hkimw/pccx-FPGA-NPU-LLM-kv260/blob/main/RELEASING.md)
+- [`pccx-FPGA-NPU-LLM-kv260` `RELEASING.md`](https://github.com/pccxai/pccx-FPGA-NPU-LLM-kv260/blob/main/RELEASING.md)
   — sibling RTL repo.  Implementation snapshots are versioned
   independently from this tooling repo.
-- [`pccx` `RELEASING.md`](https://github.com/hkimw/pccx/blob/main/RELEASING.md)
+- [`pccx` `RELEASING.md`](https://github.com/pccxai/pccx/blob/main/RELEASING.md)
   — canonical architecture / spec release flow.

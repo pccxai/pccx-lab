@@ -17,4 +17,4 @@ under each crate root and document library-level surface changes (see
   snapshot covering the trace/report infrastructure, early profiler
   components, the Tauri GUI scaffold, and a sample `dummy_trace.pccx`.
 
-[Unreleased]: https://github.com/hkimw/pccx-lab/compare/HEAD...HEAD
+[Unreleased]: https://github.com/pccxai/pccx-lab/compare/HEAD...HEAD
