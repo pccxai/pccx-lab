@@ -17,9 +17,6 @@ jobs:
   rust-check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # cargo fmt --check is intentionally not run in v1 because the existing
-    # codebase has not been formatted yet; enabling it would block every PR.
-    # Schedule a one-shot `cargo fmt --all` cleanup PR before turning fmt on.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,9 +33,14 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - name: Cache cargo / target
         uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
 
       - name: cargo check (workspace, all targets)
         run: cargo check --workspace --all-targets
