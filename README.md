@@ -53,6 +53,19 @@ See [docs/design/phase1_crate_split.md](docs/design/phase1_crate_split.md) for t
 ## .pccx file format
 Read the open specification for our [`.pccx` binary session format](https://pccxai.github.io/pccx/en/lab/pccx-format.html).
 
+## How others consume pccx-lab
+
+pccx-lab is CLI-first. GUI, editors, and integrations sit on top of the
+same controlled boundary — there is no private back channel into lab
+internals. See [docs/CLI_CORE_BOUNDARY.md](docs/CLI_CORE_BOUNDARY.md).
+
+- **systemverilog-ide** — will consume diagnostics via `pccx-lab analyze`; shape defined by `pccxai/systemverilog-ide`'s `diagnostics-v0.json`.
+- **pccx-llm-launcher** — will consume `pccx-lab status` run-status envelope once the CLI boundary matures.
+- **VS Code / editor bridges** — consume the same boundary, no separate IPC (planned).
+- **MCP / plugin workflows** — AI workers interact through a controlled MCP interface, not lab internals (planned).
+
+No stable plugin ABI or stable LSP contract is claimed today.
+
 ## Part of the pccx ecosystem
 - [pccx (docs)](https://github.com/pccxai/pccx) — NPU architecture reference
 - [pccx-FPGA-NPU-LLM-kv260 (RTL)](https://github.com/pccxai/pccx-FPGA-NPU-LLM-kv260) — RTL implementation

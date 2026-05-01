@@ -1,0 +1,24 @@
+{
+  "_note": "Early example — not a stable API contract. Shape matches pccxai/systemverilog-ide schema/diagnostics-v0.json.",
+  "envelope": "0",
+  "tool": "pccx-lab",
+  "source": "example.sv",
+  "diagnostics": [
+    {
+      "line": 5,
+      "column": 0,
+      "severity": "warning",
+      "code": "PCCX-LSP-001",
+      "message": "port `data_in` is missing the `i_` prefix required by pccx RTL conventions",
+      "source": "pccx-lsp"
+    },
+    {
+      "line": 12,
+      "column": 0,
+      "severity": "error",
+      "code": "PCCX-SCAFFOLD-003",
+      "message": "module declaration found but `endmodule` is missing",
+      "source": "pccx-lab"
+    }
+  ]
+}

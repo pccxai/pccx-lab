@@ -5,11 +5,12 @@ to the point where `npm run tauri dev` works.
 
 ## Files
 
-| Script           | Purpose                                                         |
-| ---------------- | --------------------------------------------------------------- |
-| `setup_env.sh`   | Install apt deps, Rust, Node 20, and fetch workspace deps.      |
-| `run_dev.sh`     | Launch the Tauri dev window with cargo+nvm pre-sourced.         |
-| `doctor.sh`      | Read-only environment diagnostic.  Prints versions + fixes.     |
+| Script                         | Purpose                                                         |
+| ------------------------------ | --------------------------------------------------------------- |
+| `setup_env.sh`                 | Install apt deps, Rust, Node 20, and fetch workspace deps.      |
+| `run_dev.sh`                   | Launch the Tauri dev window with cargo+nvm pre-sourced.         |
+| `doctor.sh`                    | Read-only environment diagnostic.  Prints versions + fixes.     |
+| `pccx-lab-boundary-smoke.sh`   | Verify CLI/core boundary artifacts exist and JSON examples are valid. |
 
 ## Typical flows
 

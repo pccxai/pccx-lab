@@ -55,6 +55,19 @@ jobs:
         run: cargo test --workspace
         continue-on-error: true
 
+  docs-check:
+    name: docs-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: boundary smoke
+        run: |
+          chmod +x scripts/pccx-lab-boundary-smoke.sh
+          ./scripts/pccx-lab-boundary-smoke.sh
+
   frontend-check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
