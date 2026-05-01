@@ -7,6 +7,21 @@ Pre-RTL bottleneck detection, UVM co-simulation, and LLM-driven testbench genera
 [![Rust](https://img.shields.io/badge/Rust-Language-orange.svg)]()
 [![Tauri](https://img.shields.io/badge/Tauri-Framework-teal.svg)]()
 
+## Project status
+
+**Public alpha** — first tagged release `v0.1.0-alpha` is in draft. Core
+crates and the Tauri shell are in active development; APIs and `.pccx`
+schema may shift before `v0.2.0`. Feedback and issues are welcome.
+
+| Entry point | Link |
+| --- | --- |
+| Documentation | <https://pccxai.github.io/pccx/en/lab/> |
+| Releases | <https://github.com/pccxai/pccx-lab/releases> |
+| Roadmap (project board) | <https://github.com/orgs/pccxai/projects/1> |
+| Contributing | <https://github.com/pccxai/.github/blob/main/CONTRIBUTING.md> |
+| Discussions | <https://github.com/pccxai/pccx-lab/discussions> |
+| Good first issues | <https://github.com/pccxai/pccx-lab/labels/good%20first%20issue> |
+
 ## Full documentation
 Documentation is available in both English and Korean:
 - **English:** [https://pccxai.github.io/pccx/en/lab/](https://pccxai.github.io/pccx/en/lab/)
