@@ -1,31 +1,79 @@
 {
-  "_note": "Early example — not a stable API contract.",
-  "envelope": "0",
+  "schemaVersion": "pccx.lab.status.v0",
   "tool": "pccx-lab",
   "version": "0.1.0",
-  "mode": "host-dry-run",
-  "device": {
-    "kv260": "not-probed",
-    "note": "KV260 path pending verified FPGA bring-up evidence."
+  "labMode": "cli-first-gui-foundation",
+  "workspaceState": {
+    "state": "host-ready",
+    "traceLoaded": false,
+    "source": "static-core-status",
+    "note": "No workspace scan, trace load, hardware probe, or provider call is performed."
   },
-  "inference": {
-    "status": "unavailable",
-    "note": "Inference path deferred; requires timing-closed bitstream and KV260 bring-up."
-  },
-  "diagnostics_integration": {
-    "status": "active",
-    "path": "pccx-lab analyze <file> [--format json]",
-    "consumer": "systemverilog-ide"
-  },
-  "launcher_handoff": {
-    "status": "early-scaffold",
-    "path": "pccx-lab status [--format json]",
-    "consumer": "pccx-llm-launcher"
-  },
-  "evidence_required": [
-    "timing-closed bitstream (pccx-FPGA-NPU-LLM-kv260)",
-    "KV260 bring-up verification",
-    "xsim pass evidence"
+  "availableWorkflows": [
+    {
+      "id": "status",
+      "label": "Lab status",
+      "status": "available",
+      "boundary": "pccx-lab status --format json",
+      "note": "Deterministic JSON emitted from pccx-core."
+    },
+    {
+      "id": "analyze",
+      "label": "SystemVerilog shape diagnostics",
+      "status": "early-scaffold",
+      "boundary": "pccx-lab analyze <file> --format json",
+      "note": "File-shape checks only; deeper diagnostics stay behind the same boundary."
+    },
+    {
+      "id": "theme",
+      "label": "Theme token contract",
+      "status": "experimental",
+      "boundary": "pccx-lab theme --format json",
+      "note": "Minimal semantic slots for theme-neutral presentation."
+    },
+    {
+      "id": "gui-status",
+      "label": "Compact verification dashboard",
+      "status": "foundation",
+      "boundary": "Tauri IPC reads pccx-core status",
+      "note": "The GUI renders status data and does not own workflow logic."
+    }
   ],
-  "pccx_lab_bin": "pccx-lab"
+  "pluginState": {
+    "status": "placeholder",
+    "stableAbi": false,
+    "note": "Plugin-facing contracts remain experimental; no stable plugin ABI is promised."
+  },
+  "guiState": {
+    "status": "thin-surface",
+    "style": "minimal native-editor style",
+    "surface": "compact verification dashboard",
+    "statusSource": "pccx_core::status::lab_status",
+    "themeSchemaVersion": "pccx.lab.theme-tokens.v0",
+    "themePresets": [
+      "native-light",
+      "native-dark",
+      "compact-dark",
+      "quiet-light"
+    ]
+  },
+  "diagnosticsState": {
+    "status": "early-scaffold",
+    "command": "pccx-lab analyze <file> --format json",
+    "scope": "host file-shape diagnostics only"
+  },
+  "evidenceState": {
+    "hardwareProbe": "not-run",
+    "timingClosure": "not-claimed",
+    "inference": "not-claimed",
+    "throughput": "not-claimed",
+    "note": "Status stays conservative until verified evidence exists in the proper workflow."
+  },
+  "limitations": [
+    "This is a CLI-backed GUI foundation, not a full GUI.",
+    "No MCP runtime is implemented by this boundary.",
+    "No provider, launcher, or editor runtime bridge is implemented by this boundary.",
+    "No hardware inference, throughput, or timing-closure result is claimed.",
+    "Theme presets are early semantic tokens, not a design system."
+  ]
 }

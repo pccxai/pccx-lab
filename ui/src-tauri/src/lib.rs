@@ -70,6 +70,18 @@ fn get_license_info() -> String {
     core_license_info().to_string()
 }
 
+/// Returns the reusable CLI/core lab-status contract for GUI rendering.
+#[tauri::command]
+fn lab_status() -> pccx_core::status::LabStatus {
+    pccx_core::lab_status()
+}
+
+/// Returns the reusable CLI/core theme-token contract for GUI rendering.
+#[tauri::command]
+fn theme_contract() -> pccx_core::theme::ThemeTokenContract {
+    pccx_core::theme_contract()
+}
+
 /// Returns the cached flat binary trace payload for ultra-fast JS TypedArray mapping.
 #[tauri::command]
 async fn fetch_trace_payload(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
@@ -1222,6 +1234,8 @@ pub fn run() {
             load_pccx,
             get_extensions,
             get_license_info,
+            lab_status,
+            theme_contract,
             fetch_trace_payload,
             load_pccx_alt,
             fetch_trace_payload_b,

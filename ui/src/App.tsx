@@ -17,6 +17,7 @@ import { ExtensionManager }  from "./ExtensionManager";
 import { CodeEditor }        from "./CodeEditor";
 import { VerificationSuite } from "./VerificationSuite";
 import { BottomPanel }       from "./BottomPanel";
+import { LabStatusPanel }    from "./LabStatusPanel";
 import { ShortcutHelp, useShortcutHelp } from "./useShortcuts";
 import { matchKeybinding } from "./keybindings";
 
@@ -44,7 +45,7 @@ import {
   BarChart3, Radio, X, FileText, Database,
   Maximize2, Minimize2, MoreHorizontal, ExternalLink,
   SplitSquareHorizontal, SplitSquareVertical, XCircle,
-  Workflow,
+  Workflow, ShieldCheck,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -126,6 +127,7 @@ const DEFAULT_LAYOUT: IJsonModel = {
       size: 280,
       selected: 0,
       children: [
+        { type: "tab", id: "border-lab-status", name: "Lab Status", component: "lab-status", enableClose: false },
         { type: "tab", id: "border-copilot", name: "Copilot", component: "copilot", enableClose: false },
         { type: "tab", id: "border-stats", name: "Stats", component: "stats" },
         { type: "tab", id: "border-telemetry", name: "Telemetry", component: "telemetry" },
@@ -687,6 +689,7 @@ function AppInner() {
         return <ExtensionManager />;
 
       // Border panels: right inspector
+      case "lab-status": return <LabStatusPanel />;
       case "copilot":   return renderCopilotContent();
       case "stats":     return renderStatsContent();
       case "telemetry": return renderTelemetryContent();
@@ -724,6 +727,7 @@ function AppInner() {
     search:     <Search size={11} />,
     modules:    <Blocks size={11} />,
     git:        <GitBranch size={11} />,
+    "lab-status": <ShieldCheck size={11} />,
     copilot:    <BrainCircuit size={11} />,
     stats:      <BarChart3 size={11} />,
     telemetry:  <Radio size={11} />,

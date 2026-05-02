@@ -29,7 +29,8 @@ INFO "repo: $REPO_ROOT"
 echo
 INFO "planned boundary contracts:"
 INFO "  diagnostics-envelope  (systemverilog-ide integration target)"
-INFO "  run-status-envelope   (pccx-llm-launcher integration target)"
+INFO "  lab-status-envelope   (CLI/core and GUI status surface)"
+INFO "  theme-token-envelope  (theme-neutral presentation layer)"
 INFO "  trace-discovery       (headless CI path)"
 INFO "  xsim-log-handoff      (pccx-FPGA verification loop)"
 
@@ -38,10 +39,13 @@ INFO "docs presence"
 check_file "$REPO_ROOT/docs/CLI_CORE_BOUNDARY.md"
 check_file "$REPO_ROOT/docs/examples/diagnostics-envelope.example.json"
 check_file "$REPO_ROOT/docs/examples/run-status.example.json"
+check_file "$REPO_ROOT/docs/examples/theme-tokens.example.json"
 
 echo
-INFO "analyze command source presence"
+INFO "CLI command source presence"
 check_file "$REPO_ROOT/crates/core/src/bin/pccx_lab.rs"
+check_file "$REPO_ROOT/crates/core/src/status.rs"
+check_file "$REPO_ROOT/crates/core/src/theme.rs"
 
 echo
 INFO "fixture presence"

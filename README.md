@@ -55,16 +55,22 @@ Read the open specification for our [`.pccx` binary session format](https://pccx
 
 ## How others consume pccx-lab
 
-pccx-lab is CLI-first. GUI, editors, and integrations sit on top of the
-same controlled boundary — there is no private back channel into lab
-internals. See [docs/CLI_CORE_BOUNDARY.md](docs/CLI_CORE_BOUNDARY.md).
+pccx-lab is CLI-first. GUI, editor-adjacent, launcher-adjacent, and
+future plugin-facing workflows sit on top of the same controlled
+boundary. There is no private back channel into lab internals. See
+[docs/CLI_CORE_BOUNDARY.md](docs/CLI_CORE_BOUNDARY.md).
 
-- **systemverilog-ide** — consumes diagnostics via `pccx-lab analyze` (early-scaffold, opt-in via `--backend pccx-lab`); shape defined by `pccxai/systemverilog-ide`'s `diagnostics-v0.json`.
-- **pccx-llm-launcher** — consumes `pccx-lab status` run-status envelope (early-scaffold, opt-in via `--backend pccx-lab`); no real KV260 probing yet.
-- **VS Code / editor bridges** — consume the same boundary, no separate IPC (planned).
-- **MCP / plugin workflows** — AI workers interact through a controlled MCP interface, not lab internals (planned).
+- `pccx-lab status --format json` returns deterministic lab status for
+  headless tools and the GUI status panel.
+- `pccx-lab theme --format json` returns the early theme-token contract
+  for a theme-neutral presentation layer.
+- `pccx-lab analyze <file> --format json` returns file-shape diagnostics
+  through the reusable CLI/core boundary.
 
-No stable plugin ABI or stable LSP contract is claimed today.
+The GUI is a CLI-backed GUI surface, not a separate logic island. Theme
+work is experimental. No stable plugin ABI is promised. No MCP runtime,
+provider runtime, launcher runtime, or editor runtime integration is
+implemented by this foundation.
 
 ## Part of the pccx ecosystem
 - [pccx (docs)](https://github.com/pccxai/pccx) — NPU architecture reference

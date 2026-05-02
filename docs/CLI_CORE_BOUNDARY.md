@@ -1,74 +1,98 @@
 # pccx-lab CLI/core boundary
 
-This document defines the controlled boundary through which external
-consumers — editors, launchers, CI pipelines, and future integration
-layers — interact with pccx-lab.
+This document defines the controlled boundary used by command-line,
+desktop, editor-adjacent, CI, and future integration workflows.
 
 ## Principle
 
 **CLI/core first. GUI second.**
 
-The Tauri shell and any future editor extensions are built on top of
-the CLI/core boundary, not alongside it. There is no private back
-channel from any integration layer into pccx-lab internals.
+The desktop shell is a thin surface over reusable core commands and
+status contracts. GUI-visible workflow state should be reachable
+through the same Rust core or CLI boundary that a headless consumer can
+call. The GUI may render richer panels, but it must not become a
+separate workflow logic island.
 
-This means:
+## Current boundary artifacts
 
-- The same `analyze`, `status`, and `traces` paths that the GUI uses
-  are exactly the paths that `systemverilog-ide` and `pccx-llm-launcher`
-  will consume.
-- AI workers can interact with pccx-lab through a controlled MCP
-  interface (planned). They do not get a separate internal surface.
-- The GUI may expose richer visualisation, but any state it reads must
-  be reachable through the documented CLI boundary.
-
-## Consumers
-
-| Consumer | Integration path | Status |
+| Artifact | Status | Notes |
 |---|---|---|
-| `systemverilog-ide` | `pccx-lab analyze <file>` → diagnostics envelope | active (early-scaffold) |
-| `pccx-llm-launcher` | `pccx-lab status` → run-status envelope | early-scaffold |
-| VS Code extension | same CLI boundary; no separate IPC | planned |
-| JetBrains / other IDE bridge | same CLI boundary | planned |
-| MCP interface | controlled MCP tool server wrapping CLI boundary | planned |
-| Plugin workflows | extension registry via `pccx-ai-copilot` | planned |
-| CI / headless verification | `pccx-lab` subcommands, non-interactive | planned |
+| `pccx-lab status --format json` | available | Deterministic lab-status JSON from `pccx-core`. |
+| `pccx-lab theme --format json` | experimental | Minimal semantic theme-token contract. |
+| `pccx-lab analyze <file> --format json` | early scaffold | File-shape diagnostics only. |
+| `lab_status` Tauri command | available | GUI reads the same core status struct. |
+| `theme_contract` Tauri command | experimental | GUI reads the same core theme-token struct. |
 
-## In-tree boundary artifacts
+No stable plugin ABI is promised. No MCP runtime is implemented. No
+IDE or launcher runtime integration is implemented by this foundation.
 
-Three in-tree artifacts anchor the boundary shape:
+## status command
 
-- **`crates/core/src/bin/pccx_lab.rs`** — `pccx-lab analyze` command
-  (early scaffold). File-shape checks only. Emits a diagnostics
-  envelope to stdout. No full semantic parser. No stable ABI.
-  Binary lives in `crates/core` as a low-churn scaffold; will be
-  promoted to a dedicated `crates/cli/` crate when the boundary
-  matures. See [analyze command](#analyze-command-early-scaffold) below.
+```
+pccx-lab status [--format json]
+```
 
-- **`crates/lsp/src/sv_diagnostics.rs`** — internal SV diagnostics
-  provider used by the LSP layer. Its richer convention-aware checks
-  (port prefix, stub detection) are intentionally not exposed through
-  the `analyze` command yet; that wiring is planned for a future
-  milestone when the CLI/core boundary stabilises.
+`status` emits a deterministic JSON object matching
+[`docs/examples/run-status.example.json`](examples/run-status.example.json).
+It is host-only and static by design: it does not scan the workspace,
+load traces, probe hardware, call providers, launch editor bridges, or
+run verification scripts.
 
-- **`crates/remote/openapi.yaml`** — Phase 3 daemon scaffold. The
-  `/v1/traces`, `/v1/sessions`, and `/v1/reports/{id}` paths sketch
-  the run-status and trace-discovery contracts. No endpoint is wired
-  yet; the file documents the intended surface.
+Top-level fields:
 
-[sv-schema]: https://github.com/pccxai/systemverilog-ide/blob/main/schema/diagnostics-v0.json
+| Field | Meaning |
+|---|---|
+| `schemaVersion` | Status schema marker, currently `pccx.lab.status.v0`. |
+| `labMode` | Current operating mode, currently `cli-first-gui-foundation`. |
+| `workspaceState` | Host status with `traceLoaded: false` for this static boundary. |
+| `availableWorkflows` | Reusable command or core boundaries visible to the GUI. |
+| `pluginState` | Placeholder plugin state with `stableAbi: false`. |
+| `guiState` | Minimal native-editor style surface metadata. |
+| `diagnosticsState` | Current diagnostics command and scope. |
+| `evidenceState` | Conservative evidence markers for hardware, timing, inference, and throughput. |
+| `limitations` | Human-readable constraints carried with the status output. |
 
-## analyze command (early scaffold)
+The GUI status panel renders this data through Tauri IPC. It does not
+shell out to arbitrary commands and does not duplicate workflow logic.
+
+## theme command
+
+```
+pccx-lab theme [--format json]
+```
+
+`theme` emits the early theme-neutral presentation layer contract in
+[`docs/examples/theme-tokens.example.json`](examples/theme-tokens.example.json).
+The contract is intentionally small:
+
+- `background`
+- `foreground`
+- `mutedForeground`
+- `border`
+- `panelBackground`
+- `accent`
+- `danger`
+- `warning`
+- `success`
+
+Current preset names are:
+
+- `native-light`
+- `native-dark`
+- `compact-dark`
+- `quiet-light`
+
+These are semantic slots only. They are not a heavy design system and
+do not promise a stable UI contract.
+
+## analyze command
 
 ```
 pccx-lab analyze <path> [--format json]
 ```
 
-**Status:** early scaffold — pre-stable output. Intended for
-`systemverilog-ide` integration testing. Real analysis will grow
-iteratively behind this CLI/core boundary.
-
-**What it does (file-shape checks only):**
+`analyze` emits a diagnostics envelope for a SystemVerilog file. It is
+an early scaffold for host-side file-shape checks only.
 
 | Check | Code | Severity |
 |---|---|---|
@@ -77,154 +101,44 @@ iteratively behind this CLI/core boundary.
 | No `module` declaration found | `PCCX-SHAPE-002` | error |
 | `module` present but `endmodule` missing | `PCCX-SCAFFOLD-003` | error |
 
-**What it does NOT do:**
+It does not perform full semantic parsing, hardware verification,
+provider calls, MCP calls, or GUI-only checks.
 
-- No full SystemVerilog semantic parsing.
-- No port-prefix convention checks (those live in `crates/lsp`).
-- No GUI dependency.
-- No Vivado, xsim, or hardware requirement.
-
-**Output shape** matches the envelope in
-[`docs/examples/diagnostics-envelope.example.json`](examples/diagnostics-envelope.example.json)
-and is close to `pccxai/systemverilog-ide schema/diagnostics-v0.json`.
-Divergence from that schema will be resolved once cross-repo
-coordination is complete; the `_note` field signals pre-stability.
-
-**Exit codes:**
+Exit codes:
 
 | Code | Meaning |
 |---|---|
 | 0 | No error-severity diagnostics |
 | 1 | At least one error-severity diagnostic |
-| 2 | I/O failure (file missing/unreadable); envelope still emitted |
+| 2 | I/O failure or unsupported CLI usage |
 
-**systemverilog-ide handoff path:**
+Fixtures for integration testing:
 
-`systemverilog-ide` will discover the binary via:
-1. `PCCX_LAB_BIN` environment variable (absolute path).
-2. `pccx-lab` on `$PATH`.
-3. Hard error — no silent fallback.
+- `fixtures/ok_module.sv`
+- `fixtures/missing_endmodule.sv`
+- `fixtures/empty.sv`
 
-Once the binary is installed and `PCCX_LAB_BIN` or `PATH` is set,
-`systemverilog-ide` can call `pccx-lab analyze <file>` and parse the
-JSON envelope directly. The boundary contract (stdout JSON, exit codes,
-envelope fields) is the controlled surface; internal implementation
-is not exposed.
+## GUI foundation
 
-**Fixtures for integration testing:**
+The current GUI addition is only a compact verification dashboard panel
+for status and theme metadata. It reads:
 
-- `fixtures/ok_module.sv` — valid module, exit 0
-- `fixtures/missing_endmodule.sv` — triggers `PCCX-SCAFFOLD-003`, exit 1
-- `fixtures/empty.sv` — triggers `PCCX-SHAPE-001`, exit 1
+- `pccx_core::status::lab_status` through the `lab_status` Tauri command.
+- `pccx_core::theme::theme_contract` through the `theme_contract` Tauri command.
 
-## status command (early scaffold)
+The panel does not run FPGA flows, provider calls, MCP flows, IDE
+bridges, launcher bridges, or arbitrary shell commands.
 
-```
-pccx-lab status [--format json]
-```
+## Deferred work
 
-**Status:** early scaffold — host-only, dry-run. No real KV260 probing.
-No real inference. Intended for `pccx-llm-launcher` integration testing.
-
-**What it emits:**
-
-A JSON run-status envelope with the following top-level fields:
-
-| Field | Value | Notes |
-|---|---|---|
-| `envelope` | `"0"` | envelope format version |
-| `tool` | `"pccx-lab"` | always |
-| `version` | from `CARGO_PKG_VERSION` | e.g. `"0.1.0"` |
-| `mode` | `"host-dry-run"` | no real hardware |
-| `device.kv260` | `"not-probed"` | KV260 path pending bring-up |
-| `inference.status` | `"unavailable"` | deferred until timing-closed bitstream |
-| `diagnostics_integration.status` | `"active"` | `analyze` boundary wired |
-| `launcher_handoff.status` | `"early-scaffold"` | `status` boundary wired |
-| `evidence_required` | array of strings | what must land before status changes |
-| `pccx_lab_bin` | `"pccx-lab"` | binary name |
-| `_note` | string | pre-stability marker; stripped by consumers |
-
-**What it does NOT do:**
-
-- No KV260 device probing.
-- No real inference status.
-- No xsim run status (xsim handoff is planned).
-- No GUI dependency.
-
-**Exit code:** always 0. Envelope is a static host-dry-run report.
-
-**Example output:** [`docs/examples/run-status.example.json`](examples/run-status.example.json)
-
-## Near-term contracts (planned)
-
-The following contracts are expected to solidify before `v0.2.0`:
-
-### Diagnostics envelope (systemverilog-ide integration target)
-
-Path: `pccx-lab analyze <file.sv>` → stdout JSON  
-Shape: `pccxai/systemverilog-ide schema/diagnostics-v0.json`  
-See: [`docs/examples/diagnostics-envelope.example.json`](examples/diagnostics-envelope.example.json)
-
-Resolution precedence (mirrors systemverilog-ide's `PCCX_LAB_BIN`
-convention):
-
-1. `PCCX_LAB_BIN` environment variable (absolute path).
-2. `pccx-lab` on `$PATH`.
-3. Hard error — no silent fallback to a stub when the binary is expected.
-
-### Run-status envelope (pccx-llm-launcher integration target)
-
-Path: `pccx-lab status` → stdout JSON  
-Shape: matches `pccx-schema::HealthStatus` plus launcher state fields  
-See: [`docs/examples/run-status.example.json`](examples/run-status.example.json)
-
-### Trace-report discovery (CI / headless path)
-
-Path: `pccx-lab traces [--format json]` → trace list  
-Consumed by CI to surface `.pccx` artefacts after xsim runs.
-
-### xsim log handoff (pccx-FPGA verification loop)
-
-Path: `pccx-from-xsim-log --log <xsim.log> --output <out.pccx>`  
-Already wired. Converts xsim stdout to a `.pccx` trace the lab can load.  
-Next: surface the resulting diagnostics through `pccx-lab analyze`.
-
-## Deferred contracts
-
-The following are intentionally out of scope until core contracts mature:
-
-| Contract | Notes |
+| Area | Current position |
 |---|---|
-| Stable plugin ABI | No stable plugin ABI is claimed today. Extensions use `pccx-ai-copilot` which is explicitly pre-v0.3 unstable. |
-| MCP tool server | Planned. AI-assisted SystemVerilog development workflow gated on CLI boundary stability. |
-| GUI visualisation layer | Tauri shell consumes the same CLI boundary. No separate internal surface. |
-| AI-assisted generate / simulate / evaluate / refine loop | Planned evolutionary loop. Gated on xsim + timing evidence from `pccx-FPGA-NPU-LLM-kv260`. |
+| Full GUI workflows | Deferred until reusable CLI/core commands exist. |
+| Stable plugin ABI | Not promised. |
+| MCP runtime | Not implemented in this foundation. |
+| Editor or launcher runtime bridge | Not implemented in this foundation. |
+| Hardware inference and throughput status | Not claimed by status output. |
+| Timing-closure status | Not claimed by status output. |
 
-## Non-goals
-
-- No stable plugin ABI claim today.
-- No production-ready tooling claim.
-- No autonomous hardware design claim.
-- No vendor-specific AI worker control wording.
-
-Public wording to use:
-
-> "AI workers can interact with pccx-lab through a controlled MCP interface."
-
-> "AI-assisted SystemVerilog development workflow."
-
-> "Evolutionary generate / simulate / evaluate / refine loop."
-
-Avoid these phrases — they are not accurate for this project at this stage:
-
-- "Claude can directly control pccx-lab" — not accurate; AI workers interact through a controlled interface.
-- "production-ready" is not accurate; use "pre-alpha" or "development preview" instead.
-- "stable plugin ABI" is not stable today; use "unstable, pre-v0.3" instead.
-- "timing-closed" is not yet achieved; use "timing closure pending verified bring-up".
-- "KV260 inference works" is not yet verified; use "KV260 path pending verified bring-up".
-
----
-
-*See also*:
-[AI-assisted engineering discipline](https://github.com/pccxai/pccxai/blob/main/docs/AI_ASSISTED_ENGINEERING.md) —
-the org-level reference for how AI workers interact with these boundaries.
+The intended direction is a quiet engineering UI over CLI/core data,
+not a separate workflow engine or a separate product surface.

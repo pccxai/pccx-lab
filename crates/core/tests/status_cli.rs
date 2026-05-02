@@ -31,7 +31,7 @@ fn status_emits_valid_json() {
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("stdout is not valid JSON");
 
-    assert_eq!(parsed["envelope"], "0");
+    assert_eq!(parsed["schemaVersion"], "pccx.lab.status.v0");
     assert_eq!(parsed["tool"], "pccx-lab");
 }
 
@@ -52,7 +52,7 @@ fn status_format_json_flag_accepted() {
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("stdout is not valid JSON with --format json");
 
-    assert_eq!(parsed["envelope"], "0");
+    assert_eq!(parsed["schemaVersion"], "pccx.lab.status.v0");
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn status_version_matches_cargo_version() {
 }
 
 #[test]
-fn status_mode_is_host_dry_run() {
+fn status_mode_is_cli_first_gui_foundation() {
     let out = bin()
         .arg("status")
         .output()
@@ -103,11 +103,11 @@ fn status_mode_is_host_dry_run() {
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("stdout is not valid JSON");
 
-    assert_eq!(parsed["mode"], "host-dry-run");
+    assert_eq!(parsed["labMode"], "cli-first-gui-foundation");
 }
 
 #[test]
-fn status_device_kv260_is_not_probed() {
+fn status_workspace_does_not_probe_or_load() {
     let out = bin()
         .arg("status")
         .output()
@@ -118,14 +118,15 @@ fn status_device_kv260_is_not_probed() {
         serde_json::from_str(&stdout).expect("stdout is not valid JSON");
 
     assert_eq!(
-        parsed["device"]["kv260"].as_str().unwrap_or(""),
-        "not-probed",
-        "device.kv260 must be 'not-probed' — no real hardware probing"
+        parsed["workspaceState"]["traceLoaded"].as_bool(),
+        Some(false),
+        "status must not imply a GUI trace load"
     );
+    assert_eq!(parsed["workspaceState"]["source"], "static-core-status");
 }
 
 #[test]
-fn status_inference_is_unavailable() {
+fn status_evidence_is_not_claimed() {
     let out = bin()
         .arg("status")
         .output()
@@ -136,40 +137,21 @@ fn status_inference_is_unavailable() {
         serde_json::from_str(&stdout).expect("stdout is not valid JSON");
 
     assert_eq!(
-        parsed["inference"]["status"].as_str().unwrap_or(""),
-        "unavailable",
-        "inference.status must be 'unavailable' — no real inference"
+        parsed["evidenceState"]["inference"].as_str().unwrap_or(""),
+        "not-claimed",
+        "status must not claim inference"
     );
-}
-
-#[test]
-fn status_diagnostics_integration_is_active() {
-    let out = bin()
-        .arg("status")
-        .output()
-        .expect("failed to run pccx-lab status");
-
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let parsed: serde_json::Value =
-        serde_json::from_str(&stdout).expect("stdout is not valid JSON");
-
     assert_eq!(
-        parsed["diagnostics_integration"]["status"]
+        parsed["evidenceState"]["timingClosure"]
             .as_str()
             .unwrap_or(""),
-        "active",
-        "diagnostics_integration.status must be 'active'"
-    );
-    assert_eq!(
-        parsed["diagnostics_integration"]["consumer"]
-            .as_str()
-            .unwrap_or(""),
-        "systemverilog-ide"
+        "not-claimed",
+        "status must not claim timing closure"
     );
 }
 
 #[test]
-fn status_launcher_handoff_is_early_scaffold() {
+fn status_has_diagnostics_boundary() {
     let out = bin()
         .arg("status")
         .output()
@@ -180,14 +162,68 @@ fn status_launcher_handoff_is_early_scaffold() {
         serde_json::from_str(&stdout).expect("stdout is not valid JSON");
 
     assert_eq!(
-        parsed["launcher_handoff"]["status"].as_str().unwrap_or(""),
-        "early-scaffold"
+        parsed["diagnosticsState"]["status"].as_str().unwrap_or(""),
+        "early-scaffold",
+        "diagnosticsState.status must stay conservative"
     );
     assert_eq!(
-        parsed["launcher_handoff"]["consumer"]
-            .as_str()
-            .unwrap_or(""),
-        "pccx-llm-launcher"
+        parsed["diagnosticsState"]["command"].as_str().unwrap_or(""),
+        "pccx-lab analyze <file> --format json"
+    );
+}
+
+#[test]
+fn status_plugin_state_has_no_stable_abi() {
+    let out = bin()
+        .arg("status")
+        .output()
+        .expect("failed to run pccx-lab status");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("stdout is not valid JSON");
+
+    assert_eq!(
+        parsed["pluginState"]["stableAbi"].as_bool(),
+        Some(false),
+        "status must not promise a stable plugin ABI"
+    );
+}
+
+#[test]
+fn status_output_is_deterministic() {
+    let first = bin()
+        .arg("status")
+        .output()
+        .expect("failed to run pccx-lab status");
+    let second = bin()
+        .arg("status")
+        .output()
+        .expect("failed to run pccx-lab status");
+
+    assert_eq!(first.status.code(), Some(0));
+    assert_eq!(second.status.code(), Some(0));
+    assert_eq!(first.stdout, second.stdout);
+}
+
+#[test]
+fn status_lists_theme_presets() {
+    let out = bin()
+        .arg("status")
+        .output()
+        .expect("failed to run pccx-lab status");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("stdout is not valid JSON");
+
+    let presets = parsed["guiState"]["themePresets"]
+        .as_array()
+        .expect("themePresets must be an array");
+    let names: Vec<&str> = presets.iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["native-light", "native-dark", "compact-dark", "quiet-light"]
     );
 }
 
@@ -236,6 +272,79 @@ fn status_keys_match_example_json() {
         live_keys,
         example_keys,
         "live status keys differ from example JSON.\n  live only: {:?}\n  example only: {:?}",
+        live_keys.difference(&example_keys).collect::<Vec<_>>(),
+        example_keys.difference(&live_keys).collect::<Vec<_>>(),
+    );
+}
+
+#[test]
+fn theme_command_emits_theme_contract() {
+    let out = bin()
+        .args(["theme", "--format", "json"])
+        .output()
+        .expect("failed to run pccx-lab theme --format json");
+
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("theme stdout is not valid JSON");
+
+    assert_eq!(parsed["schemaVersion"], "pccx.lab.theme-tokens.v0");
+    assert_eq!(
+        parsed["tokenSlots"].as_array().map(Vec::len),
+        Some(9),
+        "theme contract must expose the minimal token slots"
+    );
+    assert_eq!(
+        parsed["presets"].as_array().map(Vec::len),
+        Some(4),
+        "theme contract must expose the four named presets"
+    );
+}
+
+#[test]
+fn theme_keys_match_example_json() {
+    use std::path::Path;
+
+    let example_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("docs/examples/theme-tokens.example.json");
+
+    let example_text = std::fs::read_to_string(&example_path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", example_path.display()));
+    let example: serde_json::Value =
+        serde_json::from_str(&example_text).expect("theme example JSON is not valid");
+
+    let example_keys: HashSet<&str> = example
+        .as_object()
+        .expect("theme example JSON must be an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+
+    let out = bin()
+        .arg("theme")
+        .output()
+        .expect("failed to run pccx-lab theme");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let live: serde_json::Value =
+        serde_json::from_str(&stdout).expect("theme stdout is not valid JSON");
+
+    let live_keys: HashSet<&str> = live
+        .as_object()
+        .expect("theme stdout must be an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+
+    assert_eq!(
+        live_keys,
+        example_keys,
+        "live theme keys differ from example JSON.\n  live only: {:?}\n  example only: {:?}",
         live_keys.difference(&example_keys).collect::<Vec<_>>(),
         example_keys.difference(&live_keys).collect::<Vec<_>>(),
     );

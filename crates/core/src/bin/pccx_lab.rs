@@ -7,8 +7,11 @@
 ///       See docs/CLI_CORE_BOUNDARY.md for the full contract.
 ///
 ///   status [--format json]
-///       Emit a run-status envelope: version, mode, device/inference paths.
-///       Host-only / dry-run. No real KV260 probing. No real inference.
+///       Emit the deterministic lab-status contract used by CLI and GUI.
+///
+///   theme [--format json]
+///       Emit the minimal theme-token contract used by GUI surfaces.
+///
 ///       See docs/CLI_CORE_BOUNDARY.md and docs/examples/run-status.example.json.
 ///
 /// Exit codes
@@ -43,76 +46,6 @@ const TOOL: &str = "pccx-lab";
 const DIAG_SOURCE: &str = "pccx-lab";
 const ENVELOPE_NOTE: &str = "Early example — not a stable API contract. \
      Shape matches pccxai/systemverilog-ide schema/diagnostics-v0.json.";
-
-// ─── Run-status envelope ──────────────────────────────────────────────────────
-
-#[derive(Serialize)]
-struct RunStatusEnvelope {
-    _note: &'static str,
-    envelope: &'static str,
-    tool: &'static str,
-    version: &'static str,
-    mode: &'static str,
-    device: DeviceStatus,
-    inference: InferenceStatus,
-    diagnostics_integration: IntegrationStatus,
-    launcher_handoff: IntegrationStatus,
-    evidence_required: &'static [&'static str],
-    pccx_lab_bin: &'static str,
-}
-
-#[derive(Serialize)]
-struct DeviceStatus {
-    kv260: &'static str,
-    note: &'static str,
-}
-
-#[derive(Serialize)]
-struct InferenceStatus {
-    status: &'static str,
-    note: &'static str,
-}
-
-#[derive(Serialize)]
-struct IntegrationStatus {
-    status: &'static str,
-    path: &'static str,
-    consumer: &'static str,
-}
-
-fn status_envelope() -> RunStatusEnvelope {
-    RunStatusEnvelope {
-        _note: "Early example — not a stable API contract.",
-        envelope: "0",
-        tool: TOOL,
-        version: env!("CARGO_PKG_VERSION"),
-        mode: "host-dry-run",
-        device: DeviceStatus {
-            kv260: "not-probed",
-            note: "KV260 path pending verified FPGA bring-up evidence.",
-        },
-        inference: InferenceStatus {
-            status: "unavailable",
-            note: "Inference path deferred; requires timing-closed bitstream and KV260 bring-up.",
-        },
-        diagnostics_integration: IntegrationStatus {
-            status: "active",
-            path: "pccx-lab analyze <file> [--format json]",
-            consumer: "systemverilog-ide",
-        },
-        launcher_handoff: IntegrationStatus {
-            status: "early-scaffold",
-            path: "pccx-lab status [--format json]",
-            consumer: "pccx-llm-launcher",
-        },
-        evidence_required: &[
-            "timing-closed bitstream (pccx-FPGA-NPU-LLM-kv260)",
-            "KV260 bring-up verification",
-            "xsim pass evidence",
-        ],
-        pccx_lab_bin: "pccx-lab",
-    }
-}
 
 // ─── Shape checks ─────────────────────────────────────────────────────────────
 
@@ -197,8 +130,33 @@ fn analyze(path: &str) -> (Vec<DiagEntry>, i32) {
 fn usage() -> ! {
     eprintln!("usage: pccx-lab <command> [options]");
     eprintln!("  analyze <path> [--format json]   emit diagnostics envelope");
-    eprintln!("  status [--format json]            emit run-status envelope");
+    eprintln!("  status [--format json]            emit lab-status contract");
+    eprintln!("  theme [--format json]             emit theme-token contract");
     process::exit(2);
+}
+
+fn validate_json_format(args: &[String]) {
+    if args.is_empty() {
+        return;
+    }
+
+    if args[0] != "--format" {
+        eprintln!("error: unknown option `{}`", args[0]);
+        process::exit(2);
+    }
+
+    match args.get(1).map(String::as_str) {
+        Some("json") | None => {}
+        Some(other) => {
+            eprintln!("error: unsupported format `{other}` (only `json` is supported)");
+            process::exit(2);
+        }
+    }
+
+    if args.len() > 2 {
+        eprintln!("error: unexpected argument `{}`", args[2]);
+        process::exit(2);
+    }
 }
 
 fn main() {
@@ -229,22 +187,14 @@ fn main() {
             process::exit(exit_code);
         }
         "status" => {
-            // --format json is the only supported format.
-            if let Some(fmt) = args.get(1) {
-                if fmt == "--format" {
-                    match args.get(2).map(String::as_str) {
-                        Some("json") | None => {}
-                        Some(other) => {
-                            eprintln!(
-                                "error: unsupported format `{other}` (only `json` is supported)"
-                            );
-                            process::exit(2);
-                        }
-                    }
-                }
-            }
-            let envelope = status_envelope();
-            let json = serde_json::to_string_pretty(&envelope).unwrap_or_else(|_| "{}".to_string());
+            validate_json_format(&args[1..]);
+            let json = pccx_core::lab_status_json_pretty().unwrap_or_else(|_| "{}".to_string());
+            println!("{json}");
+            process::exit(0);
+        }
+        "theme" => {
+            validate_json_format(&args[1..]);
+            let json = pccx_core::theme_contract_json_pretty().unwrap_or_else(|_| "{}".to_string());
             println!("{json}");
             process::exit(0);
         }
@@ -253,9 +203,8 @@ fn main() {
             eprintln!();
             eprintln!("commands:");
             eprintln!("  analyze <path> [--format json]   emit diagnostics envelope");
-            eprintln!(
-                "  status [--format json]            emit run-status envelope (host-dry-run)"
-            );
+            eprintln!("  status [--format json]            emit lab-status contract");
+            eprintln!("  theme [--format json]             emit theme-token contract");
             eprintln!();
             eprintln!("exit codes: 0 clean  1 diagnostics found  2 I/O error");
             process::exit(0);
