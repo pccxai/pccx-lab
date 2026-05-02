@@ -32,6 +32,13 @@
       "note": "Minimal semantic slots for theme-neutral presentation."
     },
     {
+      "id": "workflows",
+      "label": "Workflow descriptor catalog",
+      "status": "available",
+      "boundary": "pccx-lab workflows --format json",
+      "note": "Descriptor-only workflow metadata emitted from pccx-core."
+    },
+    {
       "id": "gui-status",
       "label": "Compact verification dashboard",
       "status": "foundation",

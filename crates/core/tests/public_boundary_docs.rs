@@ -20,6 +20,7 @@ fn public_boundary_text() -> String {
         "docs/CLI_CORE_BOUNDARY.md",
         "docs/examples/run-status.example.json",
         "docs/examples/theme-tokens.example.json",
+        "docs/examples/workflow-descriptors.example.json",
     ]
     .into_iter()
     .map(read_repo_file)
@@ -91,6 +92,7 @@ fn gui_status_panel_consumes_core_status_without_runtime_side_effects() {
     let panel = read_repo_file("ui/src/LabStatusPanel.tsx");
     assert!(panel.contains("invoke<LabStatus>(\"lab_status\")"));
     assert!(panel.contains("invoke<ThemeTokenContract>(\"theme_contract\")"));
+    assert!(panel.contains("invoke<WorkflowDescriptorSet>(\"workflow_descriptors\")"));
 
     for phrase in [
         "run_verification",
@@ -109,6 +111,28 @@ fn gui_status_panel_consumes_core_status_without_runtime_side_effects() {
 }
 
 #[test]
+fn gui_workflow_descriptors_are_display_only_core_data() {
+    let panel = read_repo_file("ui/src/LabStatusPanel.tsx");
+    assert!(panel.contains("workflowDescriptors.descriptors"));
+    assert!(panel.contains("descriptor.label"));
+    assert!(panel.contains("descriptor.category"));
+    assert!(panel.contains("descriptor.availabilityState"));
+    assert!(panel.contains("descriptor.executionState"));
+
+    for phrase in [
+        "pccx-lab workflows --format json",
+        "SystemVerilog shape diagnostics",
+        "pccx-lab analyze <file> --format json",
+        "No MCP runtime is implemented.",
+    ] {
+        assert!(
+            !panel.contains(phrase),
+            "GUI must render workflow descriptors from IPC, not hardcode boundary text: {phrase}"
+        );
+    }
+}
+
+#[test]
 fn gui_status_types_include_contract_fields() {
     let types = read_repo_file("ui/src/labStatus.ts");
     for field in [
@@ -121,6 +145,8 @@ fn gui_status_types_include_contract_fields() {
         "evidenceState",
         "limitations",
         "ThemeTokenContract",
+        "WorkflowDescriptorSet",
+        "WorkflowDescriptor",
     ] {
         assert!(
             types.contains(field),

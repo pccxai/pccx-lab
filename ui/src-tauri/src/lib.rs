@@ -82,6 +82,12 @@ fn theme_contract() -> pccx_core::theme::ThemeTokenContract {
     pccx_core::theme_contract()
 }
 
+/// Returns descriptor-only workflow metadata for GUI rendering.
+#[tauri::command]
+fn workflow_descriptors() -> pccx_core::workflows::WorkflowDescriptorSet {
+    pccx_core::workflow_descriptors()
+}
+
 /// Returns the cached flat binary trace payload for ultra-fast JS TypedArray mapping.
 #[tauri::command]
 async fn fetch_trace_payload(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
@@ -1236,6 +1242,7 @@ pub fn run() {
             get_license_info,
             lab_status,
             theme_contract,
+            workflow_descriptors,
             fetch_trace_payload,
             load_pccx_alt,
             fetch_trace_payload_b,

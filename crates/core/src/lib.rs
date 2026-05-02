@@ -28,6 +28,7 @@ pub mod typed;
 pub mod vcd;
 pub mod vcd_writer;
 pub mod vivado_timing;
+pub mod workflows;
 
 // ─── Convenience re-exports (public API surface) ──────────────────────────────
 pub use bottleneck::{
@@ -64,4 +65,8 @@ pub use vcd_writer::{write_vcd, write_vcd_to};
 pub use vivado_timing::{
     parse_timing_report, parse_worst_endpoint, ClockDomain, FailingPath,
     ParseError as TimingParseError, TimingReport,
+};
+pub use workflows::{
+    workflow_descriptors, workflow_descriptors_json_pretty, WorkflowDescriptor,
+    WorkflowDescriptorSet,
 };

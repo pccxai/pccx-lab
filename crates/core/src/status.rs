@@ -124,6 +124,13 @@ pub fn lab_status() -> LabStatus {
                 "Minimal semantic slots for theme-neutral presentation.",
             ),
             workflow(
+                "workflows",
+                "Workflow descriptor catalog",
+                "available",
+                "pccx-lab workflows --format json",
+                "Descriptor-only workflow metadata emitted from pccx-core.",
+            ),
+            workflow(
                 "gui-status",
                 "Compact verification dashboard",
                 "foundation",

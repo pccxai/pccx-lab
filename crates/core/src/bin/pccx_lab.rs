@@ -12,6 +12,9 @@
 ///   theme [--format json]
 ///       Emit the minimal theme-token contract used by GUI surfaces.
 ///
+///   workflows [--format json]
+///       Emit descriptor-only workflow metadata used by CLI and GUI consumers.
+///
 ///       See docs/CLI_CORE_BOUNDARY.md and docs/examples/run-status.example.json.
 ///
 /// Exit codes
@@ -132,6 +135,7 @@ fn usage() -> ! {
     eprintln!("  analyze <path> [--format json]   emit diagnostics envelope");
     eprintln!("  status [--format json]            emit lab-status contract");
     eprintln!("  theme [--format json]             emit theme-token contract");
+    eprintln!("  workflows [--format json]         emit workflow descriptors");
     process::exit(2);
 }
 
@@ -198,6 +202,13 @@ fn main() {
             println!("{json}");
             process::exit(0);
         }
+        "workflows" => {
+            validate_json_format(&args[1..]);
+            let json =
+                pccx_core::workflow_descriptors_json_pretty().unwrap_or_else(|_| "{}".to_string());
+            println!("{json}");
+            process::exit(0);
+        }
         "--help" | "-h" | "help" => {
             eprintln!("pccx-lab — NPU profiler CLI boundary");
             eprintln!();
@@ -205,6 +216,7 @@ fn main() {
             eprintln!("  analyze <path> [--format json]   emit diagnostics envelope");
             eprintln!("  status [--format json]            emit lab-status contract");
             eprintln!("  theme [--format json]             emit theme-token contract");
+            eprintln!("  workflows [--format json]         emit workflow descriptors");
             eprintln!();
             eprintln!("exit codes: 0 clean  1 diagnostics found  2 I/O error");
             process::exit(0);
