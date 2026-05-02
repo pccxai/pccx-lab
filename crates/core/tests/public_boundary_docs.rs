@@ -24,6 +24,7 @@ fn public_boundary_text() -> String {
         "docs/examples/theme-tokens.example.json",
         "docs/examples/workflow-descriptors.example.json",
         "docs/examples/workflow-proposals.example.json",
+        "docs/examples/workflow-runner-blocked.example.json",
     ]
     .into_iter()
     .map(read_repo_file)
@@ -97,6 +98,7 @@ fn gui_status_panel_consumes_core_status_without_runtime_side_effects() {
     assert!(panel.contains("invoke<ThemeTokenContract>(\"theme_contract\")"));
     assert!(panel.contains("invoke<WorkflowDescriptorSet>(\"workflow_descriptors\")"));
     assert!(panel.contains("invoke<WorkflowProposalSet>(\"workflow_proposals\")"));
+    assert!(panel.contains("invoke<WorkflowRunnerStatus>(\"workflow_runner_status\")"));
 
     for phrase in [
         "run_verification",
@@ -160,6 +162,29 @@ fn gui_workflow_proposals_are_display_only_core_data() {
 }
 
 #[test]
+fn gui_workflow_runner_status_is_display_only_core_data() {
+    let panel = read_repo_file("ui/src/LabStatusPanel.tsx");
+    assert!(panel.contains("workflowRunner.schemaVersion"));
+    assert!(panel.contains("workflowRunner.mode"));
+    assert!(panel.contains("workflowRunner.enabled"));
+    assert!(panel.contains("workflowRunner.timeoutMs"));
+    assert!(panel.contains("workflowRunner.maxOutputLines"));
+    assert!(panel.contains("workflowRunner.allowlistedProposalIds"));
+
+    for phrase in [
+        "run-approved-workflow",
+        "--runner-enabled",
+        "proposal-lab-status-contract",
+        "workflowRunner.enabled=false",
+    ] {
+        assert!(
+            !panel.contains(phrase),
+            "GUI must render runner status from IPC, not hardcode runner text: {phrase}"
+        );
+    }
+}
+
+#[test]
 fn gui_status_types_include_contract_fields() {
     let types = read_repo_file("ui/src/labStatus.ts");
     for field in [
@@ -176,6 +201,7 @@ fn gui_status_types_include_contract_fields() {
         "WorkflowDescriptor",
         "WorkflowProposalSet",
         "WorkflowProposal",
+        "WorkflowRunnerStatus",
     ] {
         assert!(
             types.contains(field),

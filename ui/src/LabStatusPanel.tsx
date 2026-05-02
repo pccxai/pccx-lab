@@ -9,6 +9,7 @@ import type {
   ThemeTokenContract,
   WorkflowDescriptorSet,
   WorkflowProposalSet,
+  WorkflowRunnerStatus,
 } from "./labStatus";
 
 type LoadState =
@@ -20,6 +21,7 @@ type LoadState =
       themeContract: ThemeTokenContract;
       workflowDescriptors: WorkflowDescriptorSet;
       workflowProposals: WorkflowProposalSet;
+      workflowRunner: WorkflowRunnerStatus;
     };
 
 function StatusBadge({ value }: { value: string }) {
@@ -106,13 +108,22 @@ export function LabStatusPanel() {
   const load = useCallback(async () => {
     setState({ kind: "loading" });
     try {
-      const [status, themeContract, workflowDescriptors, workflowProposals] = await Promise.all([
-        invoke<LabStatus>("lab_status"),
-        invoke<ThemeTokenContract>("theme_contract"),
-        invoke<WorkflowDescriptorSet>("workflow_descriptors"),
-        invoke<WorkflowProposalSet>("workflow_proposals"),
-      ]);
-      setState({ kind: "ready", status, themeContract, workflowDescriptors, workflowProposals });
+      const [status, themeContract, workflowDescriptors, workflowProposals, workflowRunner] =
+        await Promise.all([
+          invoke<LabStatus>("lab_status"),
+          invoke<ThemeTokenContract>("theme_contract"),
+          invoke<WorkflowDescriptorSet>("workflow_descriptors"),
+          invoke<WorkflowProposalSet>("workflow_proposals"),
+          invoke<WorkflowRunnerStatus>("workflow_runner_status"),
+        ]);
+      setState({
+        kind: "ready",
+        status,
+        themeContract,
+        workflowDescriptors,
+        workflowProposals,
+        workflowRunner,
+      });
     } catch (err) {
       setState({ kind: "error", message: String(err) });
     }
@@ -139,7 +150,7 @@ export function LabStatusPanel() {
       );
     }
 
-    const { status, themeContract, workflowDescriptors, workflowProposals } = state;
+    const { status, themeContract, workflowDescriptors, workflowProposals, workflowRunner } = state;
 
     return (
       <>
@@ -313,6 +324,36 @@ export function LabStatusPanel() {
                 +{workflowProposals.proposals.length - 5} proposals
               </span>
             )}
+          </div>
+        </Section>
+
+        <Section title="Runner Pilot">
+          <FieldRow label="schema" value={workflowRunner.schemaVersion} />
+          <FieldRow label="mode" value={workflowRunner.mode} />
+          <FieldRow label="enabled" value={workflowRunner.enabled ? "yes" : "no"} />
+          <FieldRow label="timeout" value={`${workflowRunner.timeoutMs} ms`} />
+          <FieldRow label="max lines" value={String(workflowRunner.maxOutputLines)} />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {workflowRunner.allowlistedProposalIds.slice(0, 4).map((proposalId) => (
+              <span
+                key={proposalId}
+                title={proposalId}
+                style={{
+                  border: `0.5px solid ${theme.borderSubtle}`,
+                  borderRadius: theme.radiusSm,
+                  color: theme.textMuted,
+                  fontFamily: theme.fontMono,
+                  fontSize: 10,
+                  maxWidth: 180,
+                  overflow: "hidden",
+                  padding: "2px 6px",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {proposalId}
+              </span>
+            ))}
           </div>
         </Section>
 

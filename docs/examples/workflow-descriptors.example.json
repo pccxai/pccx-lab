@@ -125,6 +125,36 @@
       ]
     },
     {
+      "workflowId": "allowlisted-runner-pilot",
+      "label": "Disabled allowlisted runner pilot",
+      "category": "verification",
+      "description": "Disabled-by-default runner pilot for fixed pccx-lab proposal commands.",
+      "availabilityState": "disabled-by-default",
+      "executionState": "descriptor_only",
+      "inputPolicy": "Accepts only a known proposal id; no raw command input is accepted.",
+      "outputPolicy": "Bounded and redacted run-result JSON when explicitly enabled.",
+      "safetyFlags": [
+        "no-execution",
+        "no-shell",
+        "no-hardware",
+        "no-fpga-repo",
+        "no-network",
+        "no-provider-call",
+        "no-private-paths",
+        "no-secrets"
+      ],
+      "evidenceState": "metadata-only",
+      "futureConsumers": [
+        "GUI",
+        "CI/headless worker"
+      ],
+      "limitations": [
+        "Runner execution is disabled by default.",
+        "Only fixed allowlisted pccx-lab commands may run when explicitly enabled.",
+        "No hardware, network, provider, launcher, IDE, or FPGA repo access is allowed."
+      ]
+    },
+    {
       "workflowId": "systemverilog-shape-diagnostics",
       "label": "SystemVerilog shape diagnostics",
       "category": "diagnostics",

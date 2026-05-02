@@ -18,6 +18,10 @@
 ///   workflow-proposals [--format json]
 ///       Emit proposal-only workflow previews; never executes workflows.
 ///
+///   run-approved-workflow <proposal-id> [--format json]
+///       Return a blocked result by default. With explicit runner
+///       enablement, run only fixed allowlisted pccx-lab commands.
+///
 ///   diagnostics-handoff validate --file <path> [--format json]
 ///       Validate a launcher diagnostics handoff JSON file and emit a
 ///       read-only summary. Does not execute launcher or pccx-lab flows.
@@ -29,7 +33,10 @@
 ///   1  — at least one error-severity diagnostic
 ///   2  — I/O failure (file missing or unreadable; envelope still emitted)
 use serde::Serialize;
-use std::process;
+use std::io::Read;
+use std::path::Path;
+use std::process::{self, Command, Stdio};
+use std::time::{Duration, Instant};
 
 // ─── Diagnostics envelope ─────────────────────────────────────────────────────
 
@@ -144,6 +151,7 @@ fn usage() -> ! {
     eprintln!("  theme [--format json]             emit theme-token contract");
     eprintln!("  workflows [--format json]         emit workflow descriptors");
     eprintln!("  workflow-proposals [--format json] emit workflow proposals");
+    eprintln!("  run-approved-workflow <proposal-id> [--format json]");
     eprintln!("  diagnostics-handoff validate --file <path> [--format json]");
     process::exit(2);
 }
@@ -234,6 +242,183 @@ fn handle_diagnostics_handoff(args: &[String]) -> ! {
     process::exit(0);
 }
 
+fn run_approved_workflow_usage() -> ! {
+    eprintln!(
+        "usage: pccx-lab run-approved-workflow <proposal-id> [--format json] [--runner-enabled] [--timeout-ms <ms>] [--max-output-lines <n>]"
+    );
+    process::exit(2);
+}
+
+fn handle_run_approved_workflow(args: &[String]) -> ! {
+    let proposal_id = args
+        .first()
+        .map(String::as_str)
+        .unwrap_or_else(|| run_approved_workflow_usage());
+    let mut config = pccx_core::workflow_runner_config();
+    let mut format = "json";
+    let mut index = 1usize;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--format" => {
+                index += 1;
+                format = args
+                    .get(index)
+                    .map(String::as_str)
+                    .unwrap_or_else(|| run_approved_workflow_usage());
+            }
+            "--runner-enabled" => {
+                config.enabled = true;
+                config.mode = "allowlist".to_string();
+            }
+            "--timeout-ms" => {
+                index += 1;
+                config.timeout_ms = args
+                    .get(index)
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .filter(|value| *value > 0 && *value <= 300_000)
+                    .unwrap_or_else(|| run_approved_workflow_usage());
+            }
+            "--max-output-lines" => {
+                index += 1;
+                config.max_output_lines = args
+                    .get(index)
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .filter(|value| *value <= 1_000)
+                    .unwrap_or_else(|| run_approved_workflow_usage());
+            }
+            _ => run_approved_workflow_usage(),
+        }
+        index += 1;
+    }
+
+    if format != "json" {
+        let result = pccx_core::rejected_workflow_result(
+            proposal_id,
+            "unsupported format; only json is supported",
+            &config,
+        );
+        println!(
+            "{}",
+            pccx_core::workflow_run_result_json_pretty(&result)
+                .unwrap_or_else(|_| "{}".to_string())
+        );
+        process::exit(2);
+    }
+
+    let Some(command) = pccx_core::allowlisted_command_for(proposal_id) else {
+        let result = pccx_core::rejected_workflow_result(
+            proposal_id,
+            "proposal id is not in the fixed allowlist",
+            &config,
+        );
+        println!(
+            "{}",
+            pccx_core::workflow_run_result_json_pretty(&result)
+                .unwrap_or_else(|_| "{}".to_string())
+        );
+        process::exit(1);
+    };
+
+    if !config.enabled || config.mode != "allowlist" {
+        let result = pccx_core::blocked_workflow_result(&command, &config);
+        println!(
+            "{}",
+            pccx_core::workflow_run_result_json_pretty(&result)
+                .unwrap_or_else(|_| "{}".to_string())
+        );
+        process::exit(0);
+    }
+
+    let executable = std::env::current_exe().unwrap_or_else(|_| {
+        let result = pccx_core::rejected_workflow_result(
+            proposal_id,
+            "cannot resolve current pccx-lab executable",
+            &config,
+        );
+        println!(
+            "{}",
+            pccx_core::workflow_run_result_json_pretty(&result)
+                .unwrap_or_else(|_| "{}".to_string())
+        );
+        process::exit(1);
+    });
+
+    let raw = run_fixed_child(&executable, &command.fixed_args, config.timeout_ms).unwrap_or_else(
+        |message| pccx_core::RawProcessResult {
+            exit_code: None,
+            stdout: String::new(),
+            stderr: message,
+            duration_ms: 0,
+            timed_out: false,
+        },
+    );
+    let result = pccx_core::completed_workflow_result(&command, &config, raw);
+    let exit_code = if result.status == "completed" { 0 } else { 1 };
+    println!(
+        "{}",
+        pccx_core::workflow_run_result_json_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+    );
+    process::exit(exit_code);
+}
+
+fn run_fixed_child(
+    executable: &Path,
+    args: &[String],
+    timeout_ms: u64,
+) -> Result<pccx_core::RawProcessResult, String> {
+    let started = Instant::now();
+    let mut child = Command::new(executable)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("cannot spawn allowlisted pccx-lab command: {err}"))?;
+
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|err| format!("cannot poll allowlisted pccx-lab command: {err}"))?
+        {
+            let stdout = read_child_pipe(child.stdout.take())?;
+            let stderr = read_child_pipe(child.stderr.take())?;
+            return Ok(pccx_core::RawProcessResult {
+                exit_code: status.code(),
+                stdout,
+                stderr,
+                duration_ms: started.elapsed().as_millis() as u64,
+                timed_out: false,
+            });
+        }
+
+        if started.elapsed() >= Duration::from_millis(timeout_ms) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let stdout = read_child_pipe(child.stdout.take())?;
+            let stderr = read_child_pipe(child.stderr.take())?;
+            return Ok(pccx_core::RawProcessResult {
+                exit_code: None,
+                stdout,
+                stderr,
+                duration_ms: started.elapsed().as_millis() as u64,
+                timed_out: true,
+            });
+        }
+
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn read_child_pipe<T: Read>(pipe: Option<T>) -> Result<String, String> {
+    let mut output = String::new();
+    if let Some(mut pipe) = pipe {
+        pipe.read_to_string(&mut output)
+            .map_err(|err| format!("cannot read allowlisted pccx-lab output: {err}"))?;
+    }
+    Ok(output)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -287,6 +472,7 @@ fn main() {
             println!("{json}");
             process::exit(0);
         }
+        "run-approved-workflow" => handle_run_approved_workflow(&args[1..]),
         "diagnostics-handoff" => handle_diagnostics_handoff(&args[1..]),
         "--help" | "-h" | "help" => {
             eprintln!("pccx-lab — NPU profiler CLI boundary");
@@ -297,6 +483,7 @@ fn main() {
             eprintln!("  theme [--format json]             emit theme-token contract");
             eprintln!("  workflows [--format json]         emit workflow descriptors");
             eprintln!("  workflow-proposals [--format json] emit workflow proposals");
+            eprintln!("  run-approved-workflow <proposal-id> [--format json]");
             eprintln!("  diagnostics-handoff validate --file <path> [--format json]");
             eprintln!();
             eprintln!("exit codes: 0 clean  1 diagnostics found  2 I/O error");

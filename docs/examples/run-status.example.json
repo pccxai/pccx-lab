@@ -46,6 +46,13 @@
       "note": "Proposal-only workflow previews emitted from pccx-core."
     },
     {
+      "id": "run-approved-workflow",
+      "label": "Disabled allowlisted runner pilot",
+      "status": "disabled-by-default",
+      "boundary": "pccx-lab run-approved-workflow <proposal-id> --format json",
+      "note": "Fixed-args allowlist pilot; disabled unless explicitly enabled."
+    },
+    {
       "id": "gui-status",
       "label": "Compact verification dashboard",
       "status": "foundation",

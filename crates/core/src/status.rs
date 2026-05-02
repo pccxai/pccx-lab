@@ -138,6 +138,13 @@ pub fn lab_status() -> LabStatus {
                 "Proposal-only workflow previews emitted from pccx-core.",
             ),
             workflow(
+                "run-approved-workflow",
+                "Disabled allowlisted runner pilot",
+                "disabled-by-default",
+                "pccx-lab run-approved-workflow <proposal-id> --format json",
+                "Fixed-args allowlist pilot; disabled unless explicitly enabled.",
+            ),
+            workflow(
                 "gui-status",
                 "Compact verification dashboard",
                 "foundation",

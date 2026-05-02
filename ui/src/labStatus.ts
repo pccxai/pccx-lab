@@ -124,3 +124,13 @@ export interface WorkflowProposalSet {
   proposals: WorkflowProposal[];
   limitations: string[];
 }
+
+export interface WorkflowRunnerStatus {
+  schemaVersion: string;
+  enabled: boolean;
+  mode: string;
+  timeoutMs: number;
+  maxOutputLines: number;
+  allowlistedProposalIds: string[];
+  limitations: string[];
+}

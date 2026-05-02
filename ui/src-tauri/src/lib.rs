@@ -94,6 +94,13 @@ fn workflow_proposals() -> pccx_core::proposals::WorkflowProposalSet {
     pccx_core::workflow_proposals()
 }
 
+/// Returns disabled-by-default runner pilot status for GUI rendering.
+#[tauri::command]
+fn workflow_runner_status() -> pccx_core::runner::WorkflowRunnerStatus {
+    let config = pccx_core::workflow_runner_config();
+    pccx_core::workflow_runner_status(&config)
+}
+
 /// Returns the cached flat binary trace payload for ultra-fast JS TypedArray mapping.
 #[tauri::command]
 async fn fetch_trace_payload(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
@@ -1250,6 +1257,7 @@ pub fn run() {
             theme_contract,
             workflow_descriptors,
             workflow_proposals,
+            workflow_runner_status,
             fetch_trace_payload,
             load_pccx_alt,
             fetch_trace_payload_b,

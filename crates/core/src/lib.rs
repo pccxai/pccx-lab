@@ -20,6 +20,7 @@ pub mod pccx_format;
 pub mod plugin;
 pub mod proposals;
 pub mod roofline;
+pub mod runner;
 pub mod simulator;
 pub mod status;
 pub mod step_snapshot;
@@ -60,6 +61,13 @@ pub use proposals::{
 };
 pub use roofline::{
     analyze as analyze_roofline, analyze_hierarchical, RooflineBand, RooflinePoint,
+};
+pub use runner::{
+    allowlisted_command_for, allowlisted_workflow_commands, blocked_workflow_result,
+    completed_workflow_result, rejected_workflow_result, workflow_run_result_json_pretty,
+    workflow_runner_config, workflow_runner_status, workflow_runner_status_json_pretty,
+    FixedWorkflowCommand, RawProcessResult, WorkflowRunResult, WorkflowRunnerConfig,
+    WorkflowRunnerStatus,
 };
 pub use simulator::{generate_realistic_trace, save_dummy_pccx, SimConfig};
 pub use status::{lab_status, lab_status_json_pretty, LabStatus};

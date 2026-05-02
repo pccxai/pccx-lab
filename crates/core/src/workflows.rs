@@ -146,6 +146,21 @@ pub fn workflow_descriptors() -> WorkflowDescriptorSet {
                 ],
             ),
             descriptor(
+                "allowlisted-runner-pilot",
+                "Disabled allowlisted runner pilot",
+                "verification",
+                "Disabled-by-default runner pilot for fixed pccx-lab proposal commands.",
+                "disabled-by-default",
+                "Accepts only a known proposal id; no raw command input is accepted.",
+                "Bounded and redacted run-result JSON when explicitly enabled.",
+                &["GUI", "CI/headless worker"],
+                &[
+                    "Runner execution is disabled by default.",
+                    "Only fixed allowlisted pccx-lab commands may run when explicitly enabled.",
+                    "No hardware, network, provider, launcher, IDE, or FPGA repo access is allowed.",
+                ],
+            ),
+            descriptor(
                 "systemverilog-shape-diagnostics",
                 "SystemVerilog shape diagnostics",
                 "diagnostics",

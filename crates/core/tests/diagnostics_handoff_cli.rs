@@ -325,7 +325,12 @@ fn core_and_cli_sources_do_not_add_runtime_side_effect_terms() {
         .expect("cannot read diagnostics_handoff.rs");
     let cli = std::fs::read_to_string(repo_root().join("crates/core/src/bin/pccx_lab.rs"))
         .expect("cannot read pccx_lab.rs");
-    let text = format!("{core}\n{cli}").to_lowercase();
+    let diagnostics_cli = cli
+        .split("fn diagnostics_handoff_usage")
+        .nth(1)
+        .and_then(|tail| tail.split("fn run_approved_workflow_usage").next())
+        .expect("cannot isolate diagnostics handoff CLI handler");
+    let text = format!("{core}\n{diagnostics_cli}").to_lowercase();
 
     for phrase in [
         "command::new",

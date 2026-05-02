@@ -21,12 +21,14 @@ separate workflow logic island.
 | `pccx-lab theme --format json` | experimental | Minimal semantic theme-token contract. |
 | `pccx-lab workflows --format json` | available | Descriptor-only workflow catalog from `pccx-core`. |
 | `pccx-lab workflow-proposals --format json` | available | Proposal-only workflow previews from `pccx-core`. |
+| `pccx-lab run-approved-workflow <proposal-id> --format json` | disabled-by-default pilot | Fixed allowlisted runner pilot; blocked unless explicitly enabled. |
 | `pccx-lab analyze <file> --format json` | early scaffold | File-shape diagnostics only. |
 | `pccx-lab diagnostics-handoff validate --file <path> --format json` | read-only validator | Launcher diagnostics handoff schema reader. |
 | `lab_status` Tauri command | available | GUI reads the same core status struct. |
 | `theme_contract` Tauri command | experimental | GUI reads the same core theme-token struct. |
 | `workflow_descriptors` Tauri command | available | GUI reads descriptor-only workflow metadata. |
 | `workflow_proposals` Tauri command | available | GUI reads proposal-only workflow previews. |
+| `workflow_runner_status` Tauri command | available | GUI reads disabled runner pilot status only. |
 
 No stable plugin ABI is promised. No MCP runtime is implemented. No
 IDE or launcher runtime integration is implemented by this foundation.
@@ -157,6 +159,41 @@ The proposal command does not execute workflows, read user paths, create
 artifacts, run verification, start MCP runtimes, call providers, or
 touch the FPGA repo.
 
+## run-approved-workflow command
+
+```
+pccx-lab run-approved-workflow <proposal-id> [--format json]
+```
+
+`run-approved-workflow` is a disabled-by-default allowlisted runner
+pilot. Without explicit local runner enablement, it emits a blocked JSON
+result matching
+[`docs/examples/workflow-runner-blocked.example.json`](examples/workflow-runner-blocked.example.json).
+
+Default config:
+
+```text
+workflowRunner.enabled=false
+workflowRunner.mode=disabled
+workflowRunner.timeoutMs=30000
+workflowRunner.maxOutputLines=120
+```
+
+When explicitly enabled for local validation, the pilot accepts only
+known proposal ids whose command is a fixed pccx-lab argument list:
+
+- `proposal-lab-status-contract` -> `status --format json`
+- `proposal-theme-token-contract` -> `theme --format json`
+- `proposal-workflow-descriptor-catalog` -> `workflows --format json`
+- `proposal-workflow-proposal-catalog` -> `workflow-proposals --format json`
+
+The runner uses process execution without shell interpolation. It does
+not accept raw commands, arbitrary args, project paths, trace paths,
+hardware settings, provider settings, network settings, launcher
+settings, IDE settings, or FPGA repo paths. Results include exit code,
+duration, bounded stdout/stderr lines, truncation status, and redaction
+status.
+
 ## analyze command
 
 ```
@@ -233,6 +270,8 @@ for status and theme metadata. It reads:
   `workflow_descriptors` Tauri command.
 - `pccx_core::proposals::workflow_proposals` through the
   `workflow_proposals` Tauri command.
+- `pccx_core::runner::workflow_runner_status` through the
+  `workflow_runner_status` Tauri command.
 
 The panel does not run FPGA flows, provider calls, MCP flows, IDE
 bridges, launcher bridges, or arbitrary shell commands.

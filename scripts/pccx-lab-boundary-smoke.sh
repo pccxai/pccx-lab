@@ -33,6 +33,7 @@ INFO "  lab-status-envelope   (CLI/core and GUI status surface)"
 INFO "  theme-token-envelope  (theme-neutral presentation layer)"
 INFO "  workflow-descriptors  (descriptor-only workflow catalog)"
 INFO "  workflow-proposals    (proposal-only workflow previews)"
+INFO "  workflow-runner       (disabled-by-default allowlisted pilot)"
 INFO "  trace-discovery       (headless CI path)"
 INFO "  xsim-log-handoff      (pccx-FPGA verification loop)"
 
@@ -44,6 +45,7 @@ check_file "$REPO_ROOT/docs/examples/run-status.example.json"
 check_file "$REPO_ROOT/docs/examples/theme-tokens.example.json"
 check_file "$REPO_ROOT/docs/examples/workflow-descriptors.example.json"
 check_file "$REPO_ROOT/docs/examples/workflow-proposals.example.json"
+check_file "$REPO_ROOT/docs/examples/workflow-runner-blocked.example.json"
 
 echo
 INFO "CLI command source presence"
@@ -52,6 +54,7 @@ check_file "$REPO_ROOT/crates/core/src/status.rs"
 check_file "$REPO_ROOT/crates/core/src/theme.rs"
 check_file "$REPO_ROOT/crates/core/src/workflows.rs"
 check_file "$REPO_ROOT/crates/core/src/proposals.rs"
+check_file "$REPO_ROOT/crates/core/src/runner.rs"
 
 echo
 INFO "fixture presence"
