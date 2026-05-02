@@ -155,6 +155,36 @@
       ]
     },
     {
+      "workflowId": "workflow-result-summaries",
+      "label": "Workflow result summaries",
+      "category": "report",
+      "description": "Summary-only result metadata for blocked or completed workflow proposals.",
+      "availabilityState": "available",
+      "executionState": "descriptor_only",
+      "inputPolicy": "No user input is read by this descriptor.",
+      "outputPolicy": "Pretty JSON with bounded summary entries and no full logs.",
+      "safetyFlags": [
+        "no-execution",
+        "no-shell",
+        "no-hardware",
+        "no-fpga-repo",
+        "no-network",
+        "no-provider-call",
+        "no-private-paths",
+        "no-secrets"
+      ],
+      "evidenceState": "metadata-only",
+      "futureConsumers": [
+        "GUI",
+        "CI/headless worker",
+        "future IDE/launcher consumer"
+      ],
+      "limitations": [
+        "Result summaries omit stdout, stderr, generated artifacts, and hardware logs.",
+        "The current summary list is deterministic metadata, not a persistent cache."
+      ]
+    },
+    {
       "workflowId": "systemverilog-shape-diagnostics",
       "label": "SystemVerilog shape diagnostics",
       "category": "diagnostics",

@@ -68,6 +68,8 @@ boundary. There is no private back channel into lab internals. See
   metadata for GUI, CI/headless, and future tool consumers.
 - `pccx-lab workflow-proposals --format json` returns proposal-only
   previews for future approved workflow runs.
+- `pccx-lab workflow-results --format json` returns summary-only
+  workflow result metadata without full logs.
 - `pccx-lab run-approved-workflow <proposal-id> --format json` returns
   a blocked result by default; the pilot only runs fixed allowlisted
   pccx-lab commands when explicitly enabled for local validation.
@@ -78,10 +80,11 @@ boundary. There is no private back channel into lab internals. See
   future-consumer boundary.
 
 The GUI is a CLI-backed GUI surface, not a separate logic island. Theme
-work is experimental. Workflow descriptors and proposals do not execute
-anything, and the runner pilot is disabled by default. No stable plugin
-ABI is promised. No MCP runtime, provider runtime, launcher runtime, or
-editor runtime integration is implemented by this foundation.
+work is experimental. Workflow descriptors, proposals, and result
+summaries do not execute anything, and the runner pilot is disabled by
+default. No stable plugin ABI is promised. No MCP runtime, provider
+runtime, launcher runtime, or editor runtime integration is implemented
+by this foundation.
 
 The diagnostics handoff validator does not execute pccx-llm-launcher,
 load plugins, call providers, touch hardware, upload telemetry, write

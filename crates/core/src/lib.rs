@@ -19,6 +19,7 @@ pub mod mmap_reader;
 pub mod pccx_format;
 pub mod plugin;
 pub mod proposals;
+pub mod results;
 pub mod roofline;
 pub mod runner;
 pub mod simulator;
@@ -58,6 +59,10 @@ pub use pccx_format::{
 };
 pub use proposals::{
     workflow_proposals, workflow_proposals_json_pretty, WorkflowProposal, WorkflowProposalSet,
+};
+pub use results::{
+    workflow_result_summaries, workflow_result_summaries_json_pretty,
+    workflow_result_summary_from_run, WorkflowResultSummary, WorkflowResultSummarySet,
 };
 pub use roofline::{
     analyze as analyze_roofline, analyze_hierarchical, RooflineBand, RooflinePoint,

@@ -46,6 +46,13 @@
       "note": "Proposal-only workflow previews emitted from pccx-core."
     },
     {
+      "id": "workflow-results",
+      "label": "Workflow result summaries",
+      "status": "available",
+      "boundary": "pccx-lab workflow-results --format json",
+      "note": "Summary-only workflow result metadata; full logs are omitted."
+    },
+    {
       "id": "run-approved-workflow",
       "label": "Disabled allowlisted runner pilot",
       "status": "disabled-by-default",

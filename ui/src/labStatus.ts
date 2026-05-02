@@ -134,3 +134,27 @@ export interface WorkflowRunnerStatus {
   allowlistedProposalIds: string[];
   limitations: string[];
 }
+
+export interface WorkflowResultSummary {
+  schemaVersion: string;
+  proposalId: string;
+  workflowId: string;
+  status: string;
+  exitCode: number | null;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  summary: string;
+  truncated: boolean;
+  redactionApplied: boolean;
+  outputPolicy: string;
+  limitations: string[];
+}
+
+export interface WorkflowResultSummarySet {
+  schemaVersion: string;
+  tool: string;
+  maxEntries: number;
+  summaries: WorkflowResultSummary[];
+  limitations: string[];
+}

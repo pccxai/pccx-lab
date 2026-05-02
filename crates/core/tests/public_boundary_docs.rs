@@ -24,6 +24,7 @@ fn public_boundary_text() -> String {
         "docs/examples/theme-tokens.example.json",
         "docs/examples/workflow-descriptors.example.json",
         "docs/examples/workflow-proposals.example.json",
+        "docs/examples/workflow-results.example.json",
         "docs/examples/workflow-runner-blocked.example.json",
     ]
     .into_iter()
@@ -98,6 +99,7 @@ fn gui_status_panel_consumes_core_status_without_runtime_side_effects() {
     assert!(panel.contains("invoke<ThemeTokenContract>(\"theme_contract\")"));
     assert!(panel.contains("invoke<WorkflowDescriptorSet>(\"workflow_descriptors\")"));
     assert!(panel.contains("invoke<WorkflowProposalSet>(\"workflow_proposals\")"));
+    assert!(panel.contains("invoke<WorkflowResultSummarySet>(\"workflow_result_summaries\")"));
     assert!(panel.contains("invoke<WorkflowRunnerStatus>(\"workflow_runner_status\")"));
 
     for phrase in [
@@ -185,6 +187,30 @@ fn gui_workflow_runner_status_is_display_only_core_data() {
 }
 
 #[test]
+fn gui_workflow_results_are_summary_only_core_data() {
+    let panel = read_repo_file("ui/src/LabStatusPanel.tsx");
+    assert!(panel.contains("workflowResults.summaries"));
+    assert!(panel.contains("summary.workflowId"));
+    assert!(panel.contains("summary.status"));
+    assert!(panel.contains("summary.summary"));
+    assert!(panel.contains("summary.truncated"));
+    assert!(panel.contains("summary.redactionApplied"));
+
+    for phrase in [
+        "workflow-results",
+        "pccx-lab workflow-results --format json",
+        "stdoutLines",
+        "stderrLines",
+        "LOG_LINE_SHOULD_NOT_APPEAR",
+    ] {
+        assert!(
+            !panel.contains(phrase),
+            "GUI must render workflow results from IPC without hardcoded logs or command text: {phrase}"
+        );
+    }
+}
+
+#[test]
 fn gui_status_types_include_contract_fields() {
     let types = read_repo_file("ui/src/labStatus.ts");
     for field in [
@@ -202,6 +228,8 @@ fn gui_status_types_include_contract_fields() {
         "WorkflowProposalSet",
         "WorkflowProposal",
         "WorkflowRunnerStatus",
+        "WorkflowResultSummarySet",
+        "WorkflowResultSummary",
     ] {
         assert!(
             types.contains(field),

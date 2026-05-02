@@ -9,6 +9,7 @@ import type {
   ThemeTokenContract,
   WorkflowDescriptorSet,
   WorkflowProposalSet,
+  WorkflowResultSummarySet,
   WorkflowRunnerStatus,
 } from "./labStatus";
 
@@ -21,6 +22,7 @@ type LoadState =
       themeContract: ThemeTokenContract;
       workflowDescriptors: WorkflowDescriptorSet;
       workflowProposals: WorkflowProposalSet;
+      workflowResults: WorkflowResultSummarySet;
       workflowRunner: WorkflowRunnerStatus;
     };
 
@@ -108,12 +110,20 @@ export function LabStatusPanel() {
   const load = useCallback(async () => {
     setState({ kind: "loading" });
     try {
-      const [status, themeContract, workflowDescriptors, workflowProposals, workflowRunner] =
+      const [
+        status,
+        themeContract,
+        workflowDescriptors,
+        workflowProposals,
+        workflowResults,
+        workflowRunner,
+      ] =
         await Promise.all([
           invoke<LabStatus>("lab_status"),
           invoke<ThemeTokenContract>("theme_contract"),
           invoke<WorkflowDescriptorSet>("workflow_descriptors"),
           invoke<WorkflowProposalSet>("workflow_proposals"),
+          invoke<WorkflowResultSummarySet>("workflow_result_summaries"),
           invoke<WorkflowRunnerStatus>("workflow_runner_status"),
         ]);
       setState({
@@ -122,6 +132,7 @@ export function LabStatusPanel() {
         themeContract,
         workflowDescriptors,
         workflowProposals,
+        workflowResults,
         workflowRunner,
       });
     } catch (err) {
@@ -150,7 +161,14 @@ export function LabStatusPanel() {
       );
     }
 
-    const { status, themeContract, workflowDescriptors, workflowProposals, workflowRunner } = state;
+    const {
+      status,
+      themeContract,
+      workflowDescriptors,
+      workflowProposals,
+      workflowResults,
+      workflowRunner,
+    } = state;
 
     return (
       <>
@@ -353,6 +371,54 @@ export function LabStatusPanel() {
               >
                 {proposalId}
               </span>
+            ))}
+          </div>
+        </Section>
+
+        <Section title="Result Summaries">
+          <FieldRow label="schema" value={workflowResults.schemaVersion} />
+          <FieldRow label="max entries" value={String(workflowResults.maxEntries)} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            {workflowResults.summaries.slice(0, 3).map((summary) => (
+              <div
+                key={`${summary.proposalId}:${summary.status}`}
+                style={{
+                  borderBottom: `0.5px solid ${theme.borderSubtle}`,
+                  display: "grid",
+                  gap: 4,
+                  paddingBottom: 7,
+                }}
+              >
+                <div
+                  style={{
+                    alignItems: "center",
+                    display: "grid",
+                    gap: 8,
+                    gridTemplateColumns: "minmax(0, 1fr) auto",
+                  }}
+                >
+                  <span
+                    title={summary.proposalId}
+                    style={{
+                      color: theme.text,
+                      minWidth: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {summary.workflowId}
+                  </span>
+                  <StatusBadge value={summary.status} />
+                </div>
+                <span style={{ color: theme.textMuted, lineHeight: 1.45 }}>
+                  {summary.summary}
+                </span>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  <StatusBadge value={summary.truncated ? "truncated" : "summary"} />
+                  <StatusBadge value={summary.redactionApplied ? "redacted" : "clean"} />
+                </div>
+              </div>
             ))}
           </div>
         </Section>

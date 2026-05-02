@@ -138,6 +138,13 @@ pub fn lab_status() -> LabStatus {
                 "Proposal-only workflow previews emitted from pccx-core.",
             ),
             workflow(
+                "workflow-results",
+                "Workflow result summaries",
+                "available",
+                "pccx-lab workflow-results --format json",
+                "Summary-only workflow result metadata; full logs are omitted.",
+            ),
+            workflow(
                 "run-approved-workflow",
                 "Disabled allowlisted runner pilot",
                 "disabled-by-default",

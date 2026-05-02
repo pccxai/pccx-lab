@@ -21,6 +21,7 @@ separate workflow logic island.
 | `pccx-lab theme --format json` | experimental | Minimal semantic theme-token contract. |
 | `pccx-lab workflows --format json` | available | Descriptor-only workflow catalog from `pccx-core`. |
 | `pccx-lab workflow-proposals --format json` | available | Proposal-only workflow previews from `pccx-core`. |
+| `pccx-lab workflow-results --format json` | available | Summary-only workflow result metadata from `pccx-core`. |
 | `pccx-lab run-approved-workflow <proposal-id> --format json` | disabled-by-default pilot | Fixed allowlisted runner pilot; blocked unless explicitly enabled. |
 | `pccx-lab analyze <file> --format json` | early scaffold | File-shape diagnostics only. |
 | `pccx-lab diagnostics-handoff validate --file <path> --format json` | read-only validator | Launcher diagnostics handoff schema reader. |
@@ -28,6 +29,7 @@ separate workflow logic island.
 | `theme_contract` Tauri command | experimental | GUI reads the same core theme-token struct. |
 | `workflow_descriptors` Tauri command | available | GUI reads descriptor-only workflow metadata. |
 | `workflow_proposals` Tauri command | available | GUI reads proposal-only workflow previews. |
+| `workflow_result_summaries` Tauri command | available | GUI reads summary-only workflow result metadata. |
 | `workflow_runner_status` Tauri command | available | GUI reads disabled runner pilot status only. |
 
 No stable plugin ABI is promised. No MCP runtime is implemented. No
@@ -159,6 +161,38 @@ The proposal command does not execute workflows, read user paths, create
 artifacts, run verification, start MCP runtimes, call providers, or
 touch the FPGA repo.
 
+## workflow-results command
+
+```
+pccx-lab workflow-results [--format json]
+```
+
+`workflow-results` emits deterministic summary-only result metadata
+matching
+[`docs/examples/workflow-results.example.json`](examples/workflow-results.example.json).
+It is intentionally not a full log cache. The summaries omit
+`stdoutLines`, `stderrLines`, full logs, generated artifacts, hardware
+logs, provider logs, and FPGA repo paths.
+
+Summary fields:
+
+| Field | Meaning |
+|---|---|
+| `proposalId` | Fixed proposal id or a redacted placeholder for rejected input. |
+| `workflowId` | Workflow id associated with the summary. |
+| `status` | Summary status such as `blocked`, `rejected`, `completed`, `failed`, or `timed_out`. |
+| `exitCode` | Exit code when a run result exists; `null` for blocked or rejected entries. |
+| `startedAt` / `finishedAt` | `not-recorded` until a later cache records timestamps. |
+| `durationMs` | Duration carried from a run result, or `0` for deterministic metadata entries. |
+| `summary` | Short human-readable outcome. |
+| `truncated` | Whether underlying returned output was truncated before summarization. |
+| `redactionApplied` | Whether ids or returned output required redaction. |
+| `outputPolicy` | Always summary-only for this boundary. |
+
+The current list is deterministic metadata, not a persistent execution
+cache. A later cache must preserve the same summary-only posture unless
+a separate bounded log contract is reviewed.
+
 ## run-approved-workflow command
 
 ```
@@ -270,6 +304,8 @@ for status and theme metadata. It reads:
   `workflow_descriptors` Tauri command.
 - `pccx_core::proposals::workflow_proposals` through the
   `workflow_proposals` Tauri command.
+- `pccx_core::results::workflow_result_summaries` through the
+  `workflow_result_summaries` Tauri command.
 - `pccx_core::runner::workflow_runner_status` through the
   `workflow_runner_status` Tauri command.
 

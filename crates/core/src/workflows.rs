@@ -161,6 +161,20 @@ pub fn workflow_descriptors() -> WorkflowDescriptorSet {
                 ],
             ),
             descriptor(
+                "workflow-result-summaries",
+                "Workflow result summaries",
+                "report",
+                "Summary-only result metadata for blocked or completed workflow proposals.",
+                "available",
+                "No user input is read by this descriptor.",
+                "Pretty JSON with bounded summary entries and no full logs.",
+                &["GUI", "CI/headless worker", "future IDE/launcher consumer"],
+                &[
+                    "Result summaries omit stdout, stderr, generated artifacts, and hardware logs.",
+                    "The current summary list is deterministic metadata, not a persistent cache.",
+                ],
+            ),
+            descriptor(
                 "systemverilog-shape-diagnostics",
                 "SystemVerilog shape diagnostics",
                 "diagnostics",

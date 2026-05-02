@@ -18,6 +18,9 @@
 ///   workflow-proposals [--format json]
 ///       Emit proposal-only workflow previews; never executes workflows.
 ///
+///   workflow-results [--format json]
+///       Emit summary-only workflow result metadata; never emits full logs.
+///
 ///   run-approved-workflow <proposal-id> [--format json]
 ///       Return a blocked result by default. With explicit runner
 ///       enablement, run only fixed allowlisted pccx-lab commands.
@@ -151,6 +154,7 @@ fn usage() -> ! {
     eprintln!("  theme [--format json]             emit theme-token contract");
     eprintln!("  workflows [--format json]         emit workflow descriptors");
     eprintln!("  workflow-proposals [--format json] emit workflow proposals");
+    eprintln!("  workflow-results [--format json]  emit workflow result summaries");
     eprintln!("  run-approved-workflow <proposal-id> [--format json]");
     eprintln!("  diagnostics-handoff validate --file <path> [--format json]");
     process::exit(2);
@@ -472,6 +476,13 @@ fn main() {
             println!("{json}");
             process::exit(0);
         }
+        "workflow-results" => {
+            validate_json_format(&args[1..]);
+            let json = pccx_core::workflow_result_summaries_json_pretty()
+                .unwrap_or_else(|_| "{}".to_string());
+            println!("{json}");
+            process::exit(0);
+        }
         "run-approved-workflow" => handle_run_approved_workflow(&args[1..]),
         "diagnostics-handoff" => handle_diagnostics_handoff(&args[1..]),
         "--help" | "-h" | "help" => {
@@ -483,6 +494,7 @@ fn main() {
             eprintln!("  theme [--format json]             emit theme-token contract");
             eprintln!("  workflows [--format json]         emit workflow descriptors");
             eprintln!("  workflow-proposals [--format json] emit workflow proposals");
+            eprintln!("  workflow-results [--format json]  emit workflow result summaries");
             eprintln!("  run-approved-workflow <proposal-id> [--format json]");
             eprintln!("  diagnostics-handoff validate --file <path> [--format json]");
             eprintln!();

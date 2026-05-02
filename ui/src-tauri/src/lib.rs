@@ -94,6 +94,12 @@ fn workflow_proposals() -> pccx_core::proposals::WorkflowProposalSet {
     pccx_core::workflow_proposals()
 }
 
+/// Returns summary-only workflow result metadata for GUI rendering.
+#[tauri::command]
+fn workflow_result_summaries() -> pccx_core::results::WorkflowResultSummarySet {
+    pccx_core::workflow_result_summaries()
+}
+
 /// Returns disabled-by-default runner pilot status for GUI rendering.
 #[tauri::command]
 fn workflow_runner_status() -> pccx_core::runner::WorkflowRunnerStatus {
@@ -1257,6 +1263,7 @@ pub fn run() {
             theme_contract,
             workflow_descriptors,
             workflow_proposals,
+            workflow_result_summaries,
             workflow_runner_status,
             fetch_trace_payload,
             load_pccx_alt,
