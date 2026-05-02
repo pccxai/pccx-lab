@@ -4,12 +4,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { AlertTriangle, RefreshCw, ShieldCheck } from "lucide-react";
 
 import { useTheme } from "./ThemeContext";
-import type { LabStatus, ThemeTokenContract } from "./labStatus";
+import type { LabStatus, ThemeTokenContract, WorkflowDescriptorSet } from "./labStatus";
 
 type LoadState =
   | { kind: "loading" }
   | { kind: "error"; message: string }
-  | { kind: "ready"; status: LabStatus; themeContract: ThemeTokenContract };
+  | {
+      kind: "ready";
+      status: LabStatus;
+      themeContract: ThemeTokenContract;
+      workflowDescriptors: WorkflowDescriptorSet;
+    };
 
 function StatusBadge({ value }: { value: string }) {
   const theme = useTheme();
@@ -95,11 +100,12 @@ export function LabStatusPanel() {
   const load = useCallback(async () => {
     setState({ kind: "loading" });
     try {
-      const [status, themeContract] = await Promise.all([
+      const [status, themeContract, workflowDescriptors] = await Promise.all([
         invoke<LabStatus>("lab_status"),
         invoke<ThemeTokenContract>("theme_contract"),
+        invoke<WorkflowDescriptorSet>("workflow_descriptors"),
       ]);
-      setState({ kind: "ready", status, themeContract });
+      setState({ kind: "ready", status, themeContract, workflowDescriptors });
     } catch (err) {
       setState({ kind: "error", message: String(err) });
     }
@@ -126,7 +132,7 @@ export function LabStatusPanel() {
       );
     }
 
-    const { status, themeContract } = state;
+    const { status, themeContract, workflowDescriptors } = state;
 
     return (
       <>
@@ -180,6 +186,66 @@ export function LabStatusPanel() {
                 <StatusBadge value={workflow.status} />
               </div>
             ))}
+          </div>
+        </Section>
+
+        <Section title="Workflow Descriptors">
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            {workflowDescriptors.descriptors.slice(0, 5).map((descriptor) => (
+              <div
+                key={descriptor.workflowId}
+                style={{
+                  borderBottom: `0.5px solid ${theme.borderSubtle}`,
+                  display: "grid",
+                  gap: 4,
+                  paddingBottom: 7,
+                }}
+              >
+                <div
+                  style={{
+                    alignItems: "center",
+                    display: "grid",
+                    gap: 8,
+                    gridTemplateColumns: "minmax(0, 1fr) auto",
+                  }}
+                >
+                  <span
+                    title={descriptor.workflowId}
+                    style={{
+                      color: theme.text,
+                      minWidth: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {descriptor.label}
+                  </span>
+                  <StatusBadge value={descriptor.executionState} />
+                </div>
+                <div
+                  style={{
+                    color: theme.textFaint,
+                    fontFamily: theme.fontMono,
+                    fontSize: 10,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={`${descriptor.category} / ${descriptor.availabilityState}`}
+                >
+                  {descriptor.category} / {descriptor.availabilityState}
+                </div>
+                <span style={{ color: theme.textMuted, lineHeight: 1.45 }}>
+                  {descriptor.description}
+                </span>
+              </div>
+            ))}
+            {workflowDescriptors.descriptors.length > 5 && (
+              <span style={{ color: theme.textFaint, fontFamily: theme.fontMono, fontSize: 10 }}>
+                +{workflowDescriptors.descriptors.length - 5} descriptors
+              </span>
+            )}
           </div>
         </Section>
 

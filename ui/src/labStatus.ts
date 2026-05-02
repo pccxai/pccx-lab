@@ -80,3 +80,25 @@ export interface ThemeTokenContract {
   presets: ThemePreset[];
   limitations: string[];
 }
+
+export interface WorkflowDescriptor {
+  workflowId: string;
+  label: string;
+  category: string;
+  description: string;
+  availabilityState: string;
+  executionState: string;
+  inputPolicy: string;
+  outputPolicy: string;
+  safetyFlags: string[];
+  evidenceState: string;
+  futureConsumers: string[];
+  limitations: string[];
+}
+
+export interface WorkflowDescriptorSet {
+  schemaVersion: string;
+  tool: string;
+  descriptors: WorkflowDescriptor[];
+  limitations: string[];
+}

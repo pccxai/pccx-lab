@@ -12,6 +12,9 @@
 ///   theme [--format json]
 ///       Emit the minimal theme-token contract used by GUI surfaces.
 ///
+///   workflows [--format json]
+///       Emit descriptor-only workflow metadata used by CLI and GUI consumers.
+///
 ///   diagnostics-handoff validate --file <path> [--format json]
 ///       Validate a launcher diagnostics handoff JSON file and emit a
 ///       read-only summary. Does not execute launcher or pccx-lab flows.
@@ -136,6 +139,7 @@ fn usage() -> ! {
     eprintln!("  analyze <path> [--format json]   emit diagnostics envelope");
     eprintln!("  status [--format json]            emit lab-status contract");
     eprintln!("  theme [--format json]             emit theme-token contract");
+    eprintln!("  workflows [--format json]         emit workflow descriptors");
     eprintln!("  diagnostics-handoff validate --file <path> [--format json]");
     process::exit(2);
 }
@@ -265,6 +269,13 @@ fn main() {
             println!("{json}");
             process::exit(0);
         }
+        "workflows" => {
+            validate_json_format(&args[1..]);
+            let json =
+                pccx_core::workflow_descriptors_json_pretty().unwrap_or_else(|_| "{}".to_string());
+            println!("{json}");
+            process::exit(0);
+        }
         "diagnostics-handoff" => handle_diagnostics_handoff(&args[1..]),
         "--help" | "-h" | "help" => {
             eprintln!("pccx-lab — NPU profiler CLI boundary");
@@ -273,6 +284,7 @@ fn main() {
             eprintln!("  analyze <path> [--format json]   emit diagnostics envelope");
             eprintln!("  status [--format json]            emit lab-status contract");
             eprintln!("  theme [--format json]             emit theme-token contract");
+            eprintln!("  workflows [--format json]         emit workflow descriptors");
             eprintln!("  diagnostics-handoff validate --file <path> [--format json]");
             eprintln!();
             eprintln!("exit codes: 0 clean  1 diagnostics found  2 I/O error");

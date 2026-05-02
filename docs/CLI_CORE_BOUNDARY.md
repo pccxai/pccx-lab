@@ -19,10 +19,12 @@ separate workflow logic island.
 |---|---|---|
 | `pccx-lab status --format json` | available | Deterministic lab-status JSON from `pccx-core`. |
 | `pccx-lab theme --format json` | experimental | Minimal semantic theme-token contract. |
+| `pccx-lab workflows --format json` | available | Descriptor-only workflow catalog from `pccx-core`. |
 | `pccx-lab analyze <file> --format json` | early scaffold | File-shape diagnostics only. |
 | `pccx-lab diagnostics-handoff validate --file <path> --format json` | read-only validator | Launcher diagnostics handoff schema reader. |
 | `lab_status` Tauri command | available | GUI reads the same core status struct. |
 | `theme_contract` Tauri command | experimental | GUI reads the same core theme-token struct. |
+| `workflow_descriptors` Tauri command | available | GUI reads descriptor-only workflow metadata. |
 
 No stable plugin ABI is promised. No MCP runtime is implemented. No
 IDE or launcher runtime integration is implemented by this foundation.
@@ -85,6 +87,37 @@ Current preset names are:
 
 These are semantic slots only. They are not a heavy design system and
 do not promise a stable UI contract.
+
+## workflows command
+
+```
+pccx-lab workflows [--format json]
+```
+
+`workflows` emits a deterministic descriptor-only catalog matching
+[`docs/examples/workflow-descriptors.example.json`](examples/workflow-descriptors.example.json).
+Each descriptor explains what a workflow boundary is for, who may
+consume it later, and which safety constraints apply.
+
+The catalog is intentionally non-executing. It does not spawn commands,
+read trace files, scan project roots, probe hardware, call providers,
+open network connections, start MCP runtimes, or touch the FPGA repo.
+Every entry currently carries `executionState: "descriptor_only"` and
+`evidenceState: "metadata-only"`.
+
+Descriptor fields:
+
+| Field | Meaning |
+|---|---|
+| `workflowId` | Stable descriptor identifier for this early catalog. |
+| `category` | Safe grouping such as `status`, `diagnostics`, `trace`, `report`, `plugin_candidate`, or `future_mcp_candidate`. |
+| `availabilityState` | Current readiness marker such as `available`, `experimental`, `early-scaffold`, or `planned`. |
+| `executionState` | Always `descriptor_only` in this boundary. |
+| `inputPolicy` | What input the descriptor accepts. Current descriptors accept no runtime input. |
+| `outputPolicy` | Bounded metadata shape expected from this boundary or a future proposal. |
+| `safetyFlags` | Static flags documenting the no-execution, no-shell, no-hardware, no-network posture. |
+| `futureConsumers` | Intended future consumers such as GUI, CI/headless worker, future IDE/launcher consumer, or future MCP/tool consumer. |
+| `limitations` | Explicit constraints carried with the descriptor. |
 
 ## analyze command
 
@@ -158,6 +191,8 @@ for status and theme metadata. It reads:
 
 - `pccx_core::status::lab_status` through the `lab_status` Tauri command.
 - `pccx_core::theme::theme_contract` through the `theme_contract` Tauri command.
+- `pccx_core::workflows::workflow_descriptors` through the
+  `workflow_descriptors` Tauri command.
 
 The panel does not run FPGA flows, provider calls, MCP flows, IDE
 bridges, launcher bridges, or arbitrary shell commands.
