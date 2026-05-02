@@ -1,7 +1,7 @@
 pccx-lab
 ========
 
-pccx NPU 아키텍처를 위한 트레이스 프로파일링, 검증 보조, CLI 경계 문서입니다.
+pccx NPU 아키텍처를 위한 트레이스 프로파일링과 검증 보조 문서입니다.
 
 .. toctree::
    :maxdepth: 2
