@@ -1,7 +1,7 @@
 # pccx-lab User Guide
 
 **Version**: pccx v002  
-**Target Hardware**: Xilinx KV260 (ZU5EV)  
+**Target Architecture**: pccx v002 systolic-array NPU
 **Audience**: Hardware Engineers, RTL Designers, Verification Engineers
 
 ---
@@ -38,9 +38,9 @@
 
 ## 1. Introduction
 
-pccx-lab is a Tauri v2 desktop application for NPU (Neural Processing Unit) architecture profiling, verification, and development. It consumes `.pccx` binary traces emitted by the pccx-FPGA-NPU-LLM-kv260 xsim testbench suite and presents them through an integrated analysis environment combining cycle-accurate timing visualization, hardware block diagram simulation, UVM-integrated verification, and AI-assisted RTL development.
+pccx-lab is a Tauri v2 desktop application for NPU (Neural Processing Unit) architecture profiling, verification, and development. It consumes `.pccx` binary traces emitted by the pccx testbench suite and presents them through an integrated analysis environment combining cycle-accurate timing visualization, hardware block diagram simulation, UVM-integrated verification, and bounded RTL authoring helpers.
 
-The primary target hardware is the **Xilinx KV260 (ZU5EV)** FPGA platform running the pccx v002 systolic array architecture. pccx-lab serves as the single workbench for the full NPU development loop: trace ingestion, performance diagnosis, RTL editing, functional verification, and report generation.
+The target architecture category is the pccx v002 systolic array. pccx-lab serves as a workbench for trace ingestion, performance diagnosis, RTL editing, functional verification, and report generation. Hardware execution, provider calls, and launcher or editor runtime bridges remain outside the CLI/core workflow boundary described in this guide.
 
 ### Key Capabilities
 
@@ -53,7 +53,7 @@ The primary target hardware is the **Xilinx KV260 (ZU5EV)** FPGA platform runnin
 | Roofline analysis | Arithmetic intensity and memory-bound/compute-bound classification |
 | 3D MAC array visualization | Real-time 32x32 utilization heat map |
 | Report generation | Configurable PDF reports auto-populated from trace data |
-| AI assistance | Context-aware bottleneck analysis and UVM sequence generation |
+| Authoring assistance | Context-aware bottleneck analysis and UVM sequence scaffolding |
 
 ---
 
@@ -67,7 +67,7 @@ The primary target hardware is the **Xilinx KV260 (ZU5EV)** FPGA platform runnin
 | Rust toolchain | Stable, current edition (see `rust-toolchain.toml`) |
 | Node.js | LTS release compatible with Vite 7 |
 | Display | X11 session (Wayland compositing is not supported; see §2.4) |
-| Hardware | KV260 (ZU5EV) for live trace generation; pre-recorded `.pccx` files may be loaded on any host |
+| Hardware | Pre-recorded `.pccx` files may be loaded on any host; hardware trace capture is outside the CLI/core boundary |
 
 ### 2.2 Installation
 
@@ -232,7 +232,7 @@ The Flame Graph view presents a hierarchical performance breakdown derived from 
 
 ![System Simulator view](images/03-system-simulator.png)
 
-The System Simulator provides an interactive hardware model of the full pccx v002 KV260 ZU5EV module hierarchy.
+The System Simulator provides an interactive hardware model of the pccx v002 module hierarchy.
 
 #### Module Hierarchy Panel (Left)
 
@@ -295,7 +295,7 @@ The Data Flow view provides a node-based graph editor for constructing and inspe
 
 The Roofline view plots operations from the loaded trace on the standard roofline model: arithmetic intensity (operations per byte transferred) on the horizontal axis and achieved throughput (operations per second) on the vertical axis.
 
-The roofline ceiling and memory bandwidth ridge point are derived from the KV260 ZU5EV hardware parameters. Each kernel or operation segment from the trace appears as a labeled data point. Points below the memory bandwidth line are classified as **memory-bound**; points approaching the compute ceiling are classified as **compute-bound**.
+The roofline ceiling and memory bandwidth ridge point are derived from configured architecture parameters. Each kernel or operation segment from the trace appears as a labeled data point. Points below the memory bandwidth line are classified as **memory-bound**; points approaching the compute ceiling are classified as **compute-bound**.
 
 ---
 
@@ -467,9 +467,9 @@ The Copilot generates complete UVM sequence objects for five predefined optimiza
 
 Generated sequence code is inserted directly into the SV Editor at the cursor position.
 
-### OpenAI API Integration
+### Provider Boundary
 
-For extended reasoning tasks, the Copilot optionally forwards requests to the OpenAI API. Configure the API key under **Tools > Copilot Settings**. All trace data transmitted to the API is summarized by the local context-compression engine; raw binary trace data is never transmitted.
+The documented CLI/core workflow boundary does not call external providers, send traces over the network, or require provider credentials. Any future provider-backed assistant must consume the same bounded summaries as the GUI and stay behind an explicit configuration and approval boundary.
 
 ---
 

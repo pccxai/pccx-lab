@@ -317,7 +317,7 @@ bridges, launcher bridges, or arbitrary shell commands.
 | Area | Current position |
 |---|---|
 | Full GUI workflows | Deferred until reusable CLI/core commands exist. |
-| Stable plugin ABI | Not promised. |
+| Plugin ABI stability | Not promised. |
 | MCP runtime | Not implemented in this foundation. |
 | Editor or launcher runtime bridge | Not implemented in this foundation. |
 | Hardware inference and throughput status | Not claimed by status output. |
