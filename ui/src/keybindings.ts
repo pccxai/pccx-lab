@@ -112,7 +112,7 @@ export const COMMAND_LABELS: Record<string, string> = {
   "view.sidebar": "Toggle Sidebar",
   "flame.diff": "Toggle Flame Graph diff mode",
   "trace.validate": "Validate trace integrity",
-  "view.copilot": "Toggle AI Copilot panel",
+  "view.copilot": "Toggle workflow assistant panel",
   "view.bottom": "Toggle Bottom Panel",
   "view.timeline": "Timeline",
   "view.nodes": "Data Flow",

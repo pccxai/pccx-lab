@@ -64,7 +64,7 @@ struct DiagEntry {
 
 const TOOL: &str = "pccx-lab";
 const DIAG_SOURCE: &str = "pccx-lab";
-const ENVELOPE_NOTE: &str = "Early example — not a stable API contract. \
+const ENVELOPE_NOTE: &str = "Early diagnostics example; schema may change. \
      Shape matches pccxai/systemverilog-ide schema/diagnostics-v0.json.";
 
 // ─── Shape checks ─────────────────────────────────────────────────────────────
@@ -152,10 +152,11 @@ fn usage() -> ! {
     eprintln!("  analyze <path> [--format json]   emit diagnostics envelope");
     eprintln!("  status [--format json]            emit lab-status contract");
     eprintln!("  theme [--format json]             emit theme-token contract");
-    eprintln!("  workflows [--format json]         emit workflow descriptors");
-    eprintln!("  workflow-proposals [--format json] emit workflow proposals");
-    eprintln!("  workflow-results [--format json]  emit workflow result summaries");
+    eprintln!("  workflows [--format json]         emit descriptor-only workflow metadata");
+    eprintln!("  workflow-proposals [--format json] emit proposal-only workflow previews");
+    eprintln!("  workflow-results [--format json]  emit summary-only workflow results");
     eprintln!("  run-approved-workflow <proposal-id> [--format json]");
+    eprintln!("                                      blocked by default; fixed allowlist only");
     eprintln!("  diagnostics-handoff validate --file <path> [--format json]");
     process::exit(2);
 }
@@ -492,10 +493,13 @@ fn main() {
             eprintln!("  analyze <path> [--format json]   emit diagnostics envelope");
             eprintln!("  status [--format json]            emit lab-status contract");
             eprintln!("  theme [--format json]             emit theme-token contract");
-            eprintln!("  workflows [--format json]         emit workflow descriptors");
-            eprintln!("  workflow-proposals [--format json] emit workflow proposals");
-            eprintln!("  workflow-results [--format json]  emit workflow result summaries");
+            eprintln!("  workflows [--format json]         emit descriptor-only workflow metadata");
+            eprintln!("  workflow-proposals [--format json] emit proposal-only workflow previews");
+            eprintln!("  workflow-results [--format json]  emit summary-only workflow results");
             eprintln!("  run-approved-workflow <proposal-id> [--format json]");
+            eprintln!(
+                "                                      blocked by default; fixed allowlist only"
+            );
             eprintln!("  diagnostics-handoff validate --file <path> [--format json]");
             eprintln!();
             eprintln!("exit codes: 0 clean  1 diagnostics found  2 I/O error");

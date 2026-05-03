@@ -1,5 +1,5 @@
 {
-  "_note": "Early example — not a stable API contract. Shape matches pccxai/systemverilog-ide schema/diagnostics-v0.json.",
+  "_note": "Early diagnostics example; schema may change. Shape matches pccxai/systemverilog-ide schema/diagnostics-v0.json.",
   "envelope": "0",
   "tool": "pccx-lab",
   "source": "example.sv",

@@ -214,7 +214,7 @@ export function CodeEditor() {
   });
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
 
-  // AI Copilot state
+  // Local assistant state
   const [aiBoxOpen, setAiBoxOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -349,7 +349,7 @@ export function CodeEditor() {
     if (!aiPrompt) return;
     setIsGenerating(true);
     await new Promise(r => setTimeout(r, 400));
-    const snippet = `\n  // [AI Generated] -> "${aiPrompt}"\n  \`uvm_info("AI_COPILOT", "Traffic generator initialized.", UVM_MEDIUM)\n`;
+    const snippet = `\n  // [Local helper draft] -> "${aiPrompt}"\n  \`uvm_info("WORKFLOW_HELPER", "Traffic generator initialized.", UVM_MEDIUM)\n`;
     setFiles(f => ({ ...f, [activeFile]: f[activeFile] + snippet }));
     setAiPrompt("");
     setAiBoxOpen(false);
@@ -362,7 +362,7 @@ export function CodeEditor() {
       "Initializing Vivado XSIM engine...",
       "Compiling SystemVerilog targets...",
       "Parsing pccx_lab_uvm_env... [OK]",
-      "Elaborating design for kv260 target...",
+      "Elaborating design for configured local target...",
       "UVM_INFO @ 0: reporter [RNTST] Running test...",
       "UVM_INFO @ 15000: SCB [SCB] Summary: 64 total transactions",
       "Simulation finished successfully.",
@@ -437,7 +437,7 @@ export function CodeEditor() {
 
         <div className="flex gap-2 pr-3">
           <button onClick={() => setAiBoxOpen(true)} className="flex items-center gap-1.5 px-3 py-1 rounded transition-all" style={{ fontSize: 11, background: theme.bgSurface, color: kwColor, border: `0.5px solid ${theme.borderSubtle}`, fontWeight: 600 }}>
-            <Sparkles size={12} /> Ask AI
+            <Sparkles size={12} /> Draft SV
           </button>
           <button onClick={runSimulation} className="flex items-center gap-1.5 px-3 py-1 rounded transition-all hover:opacity-80" style={{ fontSize: 11, background: theme.success, color: "#fff", border: `0.5px solid ${theme.success}`, fontWeight: 600 }}>
             <Play size={12} fill="currentColor" /> Run SV Test
@@ -445,12 +445,12 @@ export function CodeEditor() {
         </div>
       </div>
 
-      {/* ─── AI Copilot Floating Prompt ─── */}
+      {/* ─── Workflow Assistant Floating Prompt ─── */}
       {aiBoxOpen && (
         <div className="absolute z-50 left-1/2 top-10 transform -translate-x-1/2 w-[400px] shadow-2xl rounded-lg overflow-hidden flex flex-col" style={{ background: theme.bgSurface, border: `0.5px solid ${theme.borderSubtle}`, boxShadow: "0 10px 40px rgba(0,0,0,0.5)" }}>
            <div className="flex items-center px-3 py-2 bg-gradient-to-r from-purple-500/20 to-blue-500/20" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
              <Sparkles size={14} color={kwColor} className="mr-2" />
-             <span style={{ fontSize: 12, fontWeight: 600, color: theme.text }}>AI Inline Generation</span>
+             <span style={{ fontSize: 12, fontWeight: 600, color: theme.text }}>Local SV Draft</span>
              <div className="flex-1" />
              <button onClick={() => setAiBoxOpen(false)} style={{ color: theme.textMuted }}><X size={14} /></button>
            </div>

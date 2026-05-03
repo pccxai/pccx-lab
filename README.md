@@ -1,6 +1,8 @@
 # pccx-lab
 
-Pre-RTL bottleneck detection, UVM co-simulation, and LLM-driven testbench generation — purpose-built for the pccx NPU architecture.
+CLI-first verification lab for pccx NPU trace profiling, workflow
+descriptors, proposal previews, disabled runner pilots, and bounded GUI
+inspection.
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Status](https://img.shields.io/badge/Status-Work_in_Progress-yellow.svg)]()
@@ -44,8 +46,8 @@ Phase 1 split the original monolithic `core` into nine focused crates under `cra
 - `crates/lsp/` — Phase 2 IntelliSense façade (sync + async provider traits, multiplexers, subprocess spawner).
 - `crates/remote/` — Phase 3 backend-daemon scaffold.
 - `crates/uvm_bridge/` — SystemVerilog/UVM DPI-C boundary.
-- `crates/ai_copilot/` — LLM invocation wrapper.
-- `ui/src-tauri/` (`pccx-ide`) — Tauri shell consuming the core / reports / ai-copilot crates.
+- `crates/ai_copilot/` — assistant-facing helper scaffolds; provider runtime integration is outside the CLI/core boundary.
+- `ui/src-tauri/` (`pccx-ide`) — Tauri shell consuming the core / reports crates through IPC.
 - `ui/` — React + Vite frontend; talks to `pccx-ide` via Tauri IPC.
 
 See [docs/design/phase1_crate_split.md](docs/design/phase1_crate_split.md) for the full dependency graph and per-crate rationale.
@@ -94,8 +96,8 @@ deterministic summary. See
 
 ## Part of the pccx ecosystem
 - [pccx (docs)](https://github.com/pccxai/pccx) — NPU architecture reference
-- [pccx-FPGA-NPU-LLM-kv260 (RTL)](https://github.com/pccxai/pccx-FPGA-NPU-LLM-kv260) — RTL implementation
-- [pccx-lab (this)](https://github.com/pccxai/pccx-lab) — Performance profiler & simulator
+- [pccx-FPGA-NPU-LLM-kv260 (RTL)](https://github.com/pccxai/pccx-FPGA-NPU-LLM-kv260) — external RTL repository
+- [pccx-lab (this)](https://github.com/pccxai/pccx-lab) — CLI-first verification lab and GUI inspector
 
 ## License
 Apache 2.0 License.

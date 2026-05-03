@@ -65,7 +65,7 @@ interface Annotation {
   severity: AnnotationSeverity;
 }
 
-// ─── Realistic demo workload — KV260 / pccx v002 one GEMV dispatch ───────────
+// ─── Demo workload - configured pccx v002 one GEMV dispatch ──────────────────
 // Used only when no real VCD has been loaded. First-run onboarding affordance.
 
 function makeDemo(): Group[] {

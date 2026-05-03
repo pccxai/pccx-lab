@@ -77,7 +77,7 @@ const STRINGS: Record<string, Record<Lang, string>> = {
   "toolbar.debug":        { en: "Debug Mode",        ko: "디버그 모드" },
 
   // Panels
-  "panel.aiCopilot":      { en: "AI Copilot",        ko: "AI Copilot" },
+  "panel.aiCopilot":      { en: "Workflow Assistant", ko: "워크플로우 도우미" },
   "panel.telemetry":      { en: "LIVE TELEMETRY",    ko: "실시간 모니터" },
   "panel.logs":           { en: "Logs",              ko: "로그" },
   "panel.console":        { en: "Console",           ko: "콘솔" },
@@ -99,20 +99,21 @@ const STRINGS: Record<string, Record<Lang, string>> = {
   "btn.send":             { en: "Send",              ko: "전송" },
   "placeholder.ask":      { en: "Ask anything…",     ko: "질문 입력…" },
 
-  // AI copilot chat — system / error messages.
-  // Any runtime error message the copilot appends must go through t()
+  // Workflow assistant chat - system / error messages.
+  // Any runtime error message the assistant appends must go through t()
   // so English mode stays fully English.
-  "copilot.idle":         { en: "AI Copilot is idle. Load a .pccx trace to start analysing.", ko: "AI Copilot 대기 중. .pccx 트레이스를 로드하면 분석을 시작합니다." },
+  "copilot.idle":         { en: "Workflow assistant is idle. Load a .pccx trace to inspect local context.", ko: "워크플로우 도우미 대기 중. .pccx 트레이스를 로드하면 로컬 컨텍스트를 확인합니다." },
   "copilot.traceLoaded":  { en: "Trace loaded.",     ko: "트레이스 로드 완료." },
   "copilot.traceFailed":  { en: "Trace load failed", ko: "트레이스 로드 실패" },
   "copilot.ipcError":     { en: "IPC error",         ko: "IPC 오류" },
-  "copilot.httpError":    { en: "HTTP error",        ko: "HTTP 오류" },
-  "copilot.apiError":     { en: "API response error", ko: "API 응답 오류" },
+  "copilot.httpError":    { en: "Provider calls are disabled", ko: "프로바이더 호출은 비활성화됨" },
+  "copilot.apiError":     { en: "Provider response unavailable", ko: "프로바이더 응답 사용 불가" },
   "copilot.uvmFailed":    { en: "UVM generation failed", ko: "UVM 생성 실패" },
   "copilot.error":        { en: "Error",             ko: "오류" },
   "copilot.context":      { en: "Context",           ko: "컨텍스트" },
   "copilot.none":         { en: "none",              ko: "없음" },
-  "copilot.hintApiKey":   { en: "(Enter an OpenAI token above for real API completions)", ko: "(Real API 통신을 원하면 상단에 토큰을 입력하세요)" },
+  "copilot.hintApiKey":   { en: "(Local-only helper; external provider calls are disabled)", ko: "(로컬 전용 도우미; 외부 프로바이더 호출은 비활성화되어 있습니다)" },
+  "copilot.localOnly":    { en: "Local-only planning. External provider calls are disabled.", ko: "로컬 전용 계획 보조입니다. 외부 프로바이더 호출은 비활성화되어 있습니다." },
   "copilot.hintExamples": { en: "Try asking:\n• \"bottleneck analysis\"\n• \"generate UVM testbench\"\n• \"build report\"\n• \"roofline analysis\"",
                             ko: "질문 예시:\n• \"병목 분석\"\n• \"UVM testbench 생성\"\n• \"보고서 생성\"\n• \"roofline 분석\"" },
   "copilot.bottleneck":   { en: "Analysis: AXI bus contention is the primary bottleneck. With 32 cores doing simultaneous DMA, each core sees 0.5 B/cycle.\n\n→ Raise L2 prefetch depth or stagger core groups.",

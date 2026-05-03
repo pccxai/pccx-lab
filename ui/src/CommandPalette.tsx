@@ -115,7 +115,7 @@ export function CommandPalette({ open, setOpen, onAction }: {
       { id: "view.canvas",     label: "3D View",                                               icon: <Box size={14}/>,            category: "View",         action: () => onAction("view.canvas") },
       { id: "view.extensions", label: "Extensions",                                             icon: <Settings2 size={14}/>,      category: "View",         action: () => onAction("view.extensions") },
       { id: "view.verify",     label: "Verification Suite",                                     icon: <CheckCircle size={14}/>,    category: "View",         action: () => onAction("view.verify") },
-      { id: "view.copilot",    label: "Toggle AI Copilot",       shortcut: s("view.copilot"), icon: <Activity size={14}/>,       category: "View",         action: () => onAction("view.copilot") },
+      { id: "view.copilot",    label: "Toggle Workflow Assistant", shortcut: s("view.copilot"), icon: <Activity size={14}/>,       category: "View",         action: () => onAction("view.copilot") },
       { id: "view.fullscreen", label: "Toggle Fullscreen",       shortcut: s("view.fullscreen"), icon: <Box size={14}/>,          category: "View",         action: () => onAction("view.fullscreen") },
 
       // Editor

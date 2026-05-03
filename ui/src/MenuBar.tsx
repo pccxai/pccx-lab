@@ -40,7 +40,7 @@ function buildMenus(act: (a: string) => () => void): Menu[] {
       { label: "3D MAC Array",        shortcut: "F5",           action: act("view.canvas") },
       { label: "Extension Store",     shortcut: "F6",           action: act("view.extensions") },
       { separator: true, label: "" },
-      { label: "AI Copilot Panel",    shortcut: "Ctrl+`",       action: act("view.copilot") },
+      { label: "Workflow Assistant",  shortcut: "Ctrl+`",       action: act("view.copilot") },
       { label: "Bottom Panel",        shortcut: "Ctrl+J",       action: act("view.bottom") },
       { separator: true, label: "" },
       { label: "Zoom In",             shortcut: "Ctrl+=",       action: act("view.zoomIn") },

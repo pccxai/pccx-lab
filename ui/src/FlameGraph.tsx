@@ -725,7 +725,7 @@ export function FlameGraph() {
                <div style={{ background: theme.mode === "dark" ? "#1e1e1e" : "#f5f5f5", padding: "8px 12px", borderRadius: 6, borderLeft: `3px solid ${theme.accent}` }}>
                  <p style={{ fontSize: 10, color: theme.textDim }}>AI Recommendation:<br/>{aiAnalysis.rec}</p>
                </div>
-               <button aria-label="Dismiss AI recommendation" onClick={() => setAiAnalysis(null)} className="absolute top-3 right-3" style={{ color: theme.textMuted }}>X</button>
+               <button aria-label="Dismiss local recommendation" onClick={() => setAiAnalysis(null)} className="absolute top-3 right-3" style={{ color: theme.textMuted }}>X</button>
             </div>
         )}
       </div>
