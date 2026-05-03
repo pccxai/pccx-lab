@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const uiRoot = fileURLToPath(new URL("..", import.meta.url));
-const scanRoots = [join(uiRoot, "src"), join(uiRoot, "index.html")];
+const defaultScanRoots = [join(uiRoot, "src"), join(uiRoot, "index.html")];
 const allowedExtensions = new Set([".ts", ".tsx", ".css", ".html"]);
 
 const lineChecks = [
@@ -29,6 +29,7 @@ const lineChecks = [
     patterns: [
       /\bfetch\s*\(/,
       /\baxios\s*\./,
+      /\baxios\s*\(/,
       /\bXMLHttpRequest\b/,
       /\bEventSource\s*\(/,
       /\bWebSocket\s*\(/,
@@ -57,6 +58,7 @@ const lineChecks = [
       /\bLLM[-\s]+driven\s+testbench\s+generation\b/i,
       /\bprovider[-\s]+backed\s+assistant\b/i,
       /\bAPI[-\s]+key[-\s]+powered\s+assistant\b/i,
+      /\bcloud[-\s]+assistant\b/i,
       /\bcloud\s+LLM\s+bridge\b/i,
       /\bcloud[-\s]+LLM\b/i,
       /\b(?:Claude|GPT)\s+directly\s+controls\s+pccx-lab\b/i,
@@ -75,6 +77,7 @@ const lineChecks = [
       /\blauncher\s+runtime\s+complete\b/i,
       /\bIDE\s+integration\s+complete\b/i,
       /\bIDE\s+runtime\s+complete\b/i,
+      /\bruntime\s+integration\s+complete\b/i,
       /\bKV260\s+inference\s+works\b/i,
       /\b20\s+tok\/s\s+achieved\b/i,
       /\btiming\s+closed\b/i,
@@ -98,6 +101,7 @@ const compactBans = [
   "providertoken",
   "aicopilot",
   "askai",
+  "cloudassistant",
   "cloudllm",
   "cloudllmbridge",
   "providerbackedassistant",
@@ -112,6 +116,7 @@ const compactBans = [
   "launcherruntimecomplete",
   "ideintegrationcomplete",
   "ideruntimecomplete",
+  "runtimeintegrationcomplete",
   "kv260inferenceworks",
   "20toksachieved",
   "timingclosed",
@@ -137,6 +142,51 @@ function collectFiles(path, out = []) {
     collectFiles(join(path, entry), out);
   }
   return out;
+}
+
+function usage() {
+  return [
+    "Usage: node scripts/local-assistant-guard.mjs [--root <path>...]",
+    "",
+    "Without --root, scans the production UI source roots.",
+    "With --root, scans only the supplied fixture or source path(s).",
+  ].join("\n");
+}
+
+function parseScanRoots(argv) {
+  const roots = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+
+    if (arg === "--help" || arg === "-h") {
+      console.log(usage());
+      process.exit(0);
+    }
+
+    if (arg === "--root") {
+      const root = argv[index + 1];
+      if (!root) {
+        throw new Error("Missing path after --root");
+      }
+      roots.push(resolve(root));
+      index += 1;
+      continue;
+    }
+
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  return roots.length > 0 ? roots : defaultScanRoots;
+}
+
+let scanRoots;
+try {
+  scanRoots = parseScanRoots(process.argv.slice(2));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  console.error(usage());
+  process.exit(2);
 }
 
 const files = scanRoots.flatMap(root => collectFiles(root));

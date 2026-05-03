@@ -13,6 +13,13 @@ to the point where `npm run tauri dev` works.
 | `pccx-lab-boundary-smoke.sh`   | Verify CLI/core boundary artifacts exist and JSON examples are valid. |
 | `validate-local.sh`            | Run the local PR-readiness gate: Rust, frontend, static guards, and boundary smoke. |
 
+`npm run test:static` in `ui/` runs the local assistant guard against
+production GUI/source copy, then runs fixture tests that prove forbidden
+API-key, provider-call, overclaim wording, and runtime-claim examples
+fail while safe local-only wording passes. The fixtures are inert test
+text only; they do not add provider, credential, telemetry, or runtime
+integration paths.
+
 ## Typical flows
 
 **Fresh machine:**

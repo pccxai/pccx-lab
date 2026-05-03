@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
-    "test:static": "node scripts/local-assistant-guard.mjs",
+    "test:static": "npm run test:static:source && npm run test:static:fixtures",
+    "test:static:source": "node scripts/local-assistant-guard.mjs",
+    "test:static:fixtures": "node scripts/local-assistant-guard-fixtures.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"
