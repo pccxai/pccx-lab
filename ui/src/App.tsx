@@ -128,7 +128,7 @@ const DEFAULT_LAYOUT: IJsonModel = {
       selected: 0,
       children: [
         { type: "tab", id: "border-lab-status", name: "Lab Status", component: "lab-status", enableClose: false },
-        { type: "tab", id: "border-copilot", name: "Copilot", component: "copilot", enableClose: false },
+        { type: "tab", id: "border-copilot", name: "Workflow Assistant", component: "copilot", enableClose: false },
         { type: "tab", id: "border-stats", name: "Stats", component: "stats" },
         { type: "tab", id: "border-telemetry", name: "Telemetry", component: "telemetry" },
       ],
@@ -320,13 +320,12 @@ function AppInner() {
     }
   }, [model]);
 
-  // ── AI Chat ──────────────────────────────────────────────────────────────
+  // ── Workflow Assistant Chat ─────────────────────────────────────────────
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: "system", content: t("copilot.idle") },
   ]);
   const [inputText, setInputText] = useState("");
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("pccx_openai_key") || "");
   const [copilotBusy, setCopilotBusy] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -467,43 +466,23 @@ function AppInner() {
     try {
       let ctx = "";
       if (traceLoaded) { try { ctx = await invoke("compress_trace_context"); } catch {} }
-      if (!apiKey) {
-        const low = text.toLowerCase();
-        let reply = "";
-        if (low.includes("병목") || low.includes("bottleneck")) {
-          reply = `${t("copilot.context")}: ${ctx}\n\n${t("copilot.bottleneck")}`;
-        } else if (low.includes("uvm") || low.includes("testbench") || low.includes("코드")) {
-          try {
-            const s = low.includes("barrier") ? "barrier_reduction" : "l2_prefetch";
-            const sv: string = await invoke("generate_uvm_sequence_cmd", { strategy: s });
-            reply = `${t("copilot.uvmIntro")} (${s}):\n\n\`\`\`\n${sv}\n\`\`\`\n\n${t("copilot.uvmHint")}`;
-          } catch { reply = t("copilot.uvmFailed"); }
-        } else if (low.includes("report") || low.includes("보고서")) {
-          reply = t("copilot.reportHint");
-          selectOrAddTab("report", "Report", "report");
-        } else {
-          reply = `${t("copilot.context")}: ${ctx || t("copilot.none")}\n\n${t("copilot.hintExamples")}`;
-        }
-        addMsg("ai", `${reply}\n${t("copilot.hintApiKey")}`);
-      } else {
+      const low = text.toLowerCase();
+      let reply = "";
+      if (low.includes("병목") || low.includes("bottleneck")) {
+        reply = `${t("copilot.context")}: ${ctx}\n\n${t("copilot.bottleneck")}`;
+      } else if (low.includes("uvm") || low.includes("testbench") || low.includes("코드")) {
         try {
-          const res = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-            body: JSON.stringify({
-              model: "gpt-4o-mini",
-              messages: [
-                { role: "system", content: "You are the AI Copilot for pccx-lab EDA profiler. You assist with SystemVerilog, UVM, and NPU bottleneck analysis. Output context: " + ctx },
-                ...messages.filter(m => m.role !== "system").map(m => ({ role: m.role === "ai" ? "assistant" : "user", content: m.content })),
-                { role: "user", content: text }
-              ]
-            })
-          });
-          const data = await res.json();
-          if (data.choices?.[0]) addMsg("ai", data.choices[0].message.content);
-          else addMsg("system", `${t("copilot.apiError")}: ${data.error?.message || "Unknown error"}`);
-        } catch (err: any) { addMsg("system", `${t("copilot.httpError")}: ${err.message}`); }
+          const s = low.includes("barrier") ? "barrier_reduction" : "l2_prefetch";
+          const sv: string = await invoke("generate_uvm_sequence_cmd", { strategy: s });
+          reply = `${t("copilot.uvmIntro")} (${s}):\n\n\`\`\`\n${sv}\n\`\`\`\n\n${t("copilot.uvmHint")}`;
+        } catch { reply = t("copilot.uvmFailed"); }
+      } else if (low.includes("report") || low.includes("보고서")) {
+        reply = t("copilot.reportHint");
+        selectOrAddTab("report", "Report", "report");
+      } else {
+        reply = `${t("copilot.context")}: ${ctx || t("copilot.none")}\n\n${t("copilot.hintExamples")}`;
       }
+      addMsg("ai", `${reply}\n${t("copilot.hintApiKey")}`);
     } catch (e) { addMsg("ai", `${t("copilot.error")}: ${e}`); }
     finally { setCopilotBusy(false); }
   };
@@ -529,16 +508,9 @@ function AppInner() {
 
   const renderCopilotContent = () => (
     <div className="w-full h-full flex flex-col min-w-0 min-h-0">
-      <div className="flex px-3 pb-2 pt-2 gap-2 shrink-0" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
-        <span style={{ fontSize: 10, color: theme.textMuted, whiteSpace: "nowrap", paddingTop: 4 }}>API Key:</span>
-        <input
-          type="password"
-          className="flex-1 rounded px-2 outline-none text-xs"
-          style={{ background: theme.bgInput, borderColor: theme.borderDim, color: theme.text, border: `0.5px solid ${theme.borderDim}` }}
-          value={apiKey}
-          onChange={e => { setApiKey(e.target.value); localStorage.setItem("pccx_openai_key", e.target.value); }}
-          placeholder="sk-proj-..."
-        />
+      <div className="flex flex-col px-3 pb-2 pt-2 gap-1 shrink-0" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
+        <span style={{ fontSize: 11, color: theme.text, fontWeight: 600 }}>{t("panel.aiCopilot")}</span>
+        <span style={{ fontSize: 10, color: theme.textMuted, lineHeight: 1.4 }}>{t("copilot.localOnly")}</span>
       </div>
       <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5 min-h-0">
         {messages.map((m, i) => (
@@ -551,7 +523,7 @@ function AppInner() {
               ? { background: theme.bgSurface, color: theme.text }
               : { background: "transparent", color: theme.textMuted, fontSize: 10 }),
           }}>
-            {m.role === "ai" && <span style={{ color: theme.accent, fontWeight: 600, fontSize: 10, display: "block", marginBottom: 2 }}>AI</span>}
+            {m.role === "ai" && <span style={{ color: theme.accent, fontWeight: 600, fontSize: 10, display: "block", marginBottom: 2 }}>Assistant</span>}
             {m.content}
           </div>
         ))}
@@ -701,7 +673,7 @@ function AppInner() {
       default:
         return <div style={{ padding: 16, color: theme.textMuted }}>Unknown panel: {component}</div>;
     }
-  }, [theme, header, license, messages, inputText, apiKey, copilotBusy, traceLoaded]);
+  }, [theme, header, license, messages, inputText, copilotBusy, traceLoaded, t]);
 
   // ── Tab Rendering ───────────────────────────────────────────────────────
 

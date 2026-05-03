@@ -9,8 +9,8 @@ import { useRafScheduler } from "./hooks/useRafScheduler";
 import { useVisibilityGate } from "./hooks/useVisibilityGate";
 
 /* ─────────────────────────────────────────────────────────────────────────
- * pccx v002 KV260 module hierarchy.
- * Modelled from hw/rtl/ in pccx-FPGA-NPU-LLM-kv260.  Each leaf module
+ * pccx v002 configured module hierarchy.
+ * Modelled from local architecture metadata. Each leaf module
  * carries its known signal surface (ports) + a "what it does" blurb.
  * The x/y/w/h coordinates describe its slot in the block-diagram canvas
  * at depth N; sub-modules are drawn nested inside their parent's box.
@@ -847,7 +847,7 @@ export function HardwareVisualizer() {
       {/* Header */}
       <div className="flex items-center px-4 shrink-0 gap-3" style={{ height: 40, borderBottom: `0.5px solid ${theme.borderSubtle}` }}>
         <Cpu size={16} style={{ color: theme.accent }} />
-        <span style={{ fontSize: 13, fontWeight: 600 }}>System Simulator — pccx v002 / KV260 ZU5EV</span>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>System Simulator - pccx v002 configured target</span>
         <span style={{ fontSize: 10, color: theme.textMuted }}>
           6 top modules · {flat.length} total · 1 GHz core · cycle-accurate script
         </span>

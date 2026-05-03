@@ -11,7 +11,7 @@ const HEX_LUT: string[] = Array.from({ length: 256 }, (_, i) =>
   i.toString(16).toUpperCase().padStart(2, "0"),
 );
 
-// ─── Memory region model (pccx v002 KV260 layout) ────────────────────────────
+// ─── Memory region model (pccx v002 configured layout) ───────────────────────
 
 type AccessKind = "read" | "write";
 

@@ -31,7 +31,7 @@ interface RooflineBand {
   ai_max:       number;
 }
 
-// pccx v002 · KV260 target roofline constants
+// pccx v002 configured-target roofline constants
 const PEAK_TOPS   = 1024;   // 32x32 MAC @ 1 GHz = 1024 GOPS
 const PEAK_DDR_BW = 21.3;   // LPDDR4-2400 x 64-bit effective
 const PEAK_URAM_BW= 112.0;  // 64 URAM x 72b @ 250 MHz
@@ -705,7 +705,7 @@ export function Roofline() {
     <div className="w-full h-full flex flex-col" style={{ background: theme.bgPanel }}>
       <div className="flex items-center px-4 h-10 shrink-0" style={{ borderBottom: `0.5px solid ${theme.borderSubtle}`, background: theme.bgSurface }}>
         <ActivitySquare size={16} className="mr-2" style={{ color: theme.warning }} />
-        <span style={{ fontWeight: 600, fontSize: 13 }}>Roofline Analyser — pccx v002 · KV260</span>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>Roofline Analyser - pccx v002 configured target</span>
         <span style={{ fontSize: 10, color: theme.textMuted, marginLeft: 12 }}>
           peak compute <b style={{ color: theme.text }}>{PEAK_TOPS} GOPS</b>
           &nbsp;· DDR4 <b style={{ color: theme.text }}>{PEAK_DDR_BW} GB/s</b>

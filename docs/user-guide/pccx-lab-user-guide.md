@@ -26,7 +26,7 @@
 6. [Verification Suite](#6-verification-suite)
 7. [Report Generation](#7-report-generation)
 8. [Scenario Flow](#8-scenario-flow)
-9. [AI Copilot](#9-ai-copilot)
+9. [Workflow Assistant](#9-workflow-assistant)
 10. [Keyboard Shortcuts](#10-keyboard-shortcuts)
 11. [Theme and Localization](#11-theme-and-localization)
 12. [CLI Tools](#12-cli-tools)
@@ -146,7 +146,7 @@ The tab bar provides access to 14 analysis views. Each tab corresponds to a dist
 
 ### 3.4 Panel Docks
 
-Three dockable panel positions are available: left dock, right dock, and bottom dock. The AI Copilot panel (Section 9) may be docked to any of these positions. The bottom dock hosts the Log, Console, and Live Telemetry sub-panels.
+Three dockable panel positions are available: left dock, right dock, and bottom dock. The Workflow Assistant panel (Section 9) may be docked to any of these positions. The bottom dock hosts the Log, Console, and Live Telemetry sub-panels.
 
 ### 3.5 Status Bar
 
@@ -160,7 +160,7 @@ The status bar at the bottom of the window displays:
 
 ### 3.6 Activity Bar
 
-Two toggle buttons on the right edge of the window control the AI Copilot panel visibility and the Live Telemetry panel visibility.
+Two toggle buttons on the right edge of the window control the Workflow Assistant panel visibility and the Live Telemetry panel visibility.
 
 ---
 
@@ -322,7 +322,7 @@ The SV Editor provides a full-featured SystemVerilog development environment bui
 | NPU Interface | SystemVerilog interface definition for NPU bus connections |
 | Scoreboard | UVM scoreboard with expected/actual comparison logic |
 
-**Ask AI**: Opens the AI Copilot panel pre-focused on code generation for the current file context. The copilot receives the visible editor content as context.
+**Draft SV**: Opens the local draft helper for the current file context. The helper stays inside the GUI and does not call an external provider.
 
 **Run SV Test**: Invokes the integrated simulation console directly from the editor. Compilation errors are reported inline as Monaco editor markers.
 
@@ -445,17 +445,17 @@ Clicking a node opens the corresponding cycle range in the Timeline view for det
 
 ---
 
-## 9. AI Copilot
+## 9. Workflow Assistant
 
-The AI Copilot is a context-aware assistant integrated into pccx-lab via a dockable panel (left, right, or bottom). Its functions span performance analysis and RTL code generation.
+The Workflow Assistant is a local-only planning surface integrated into pccx-lab via a dockable panel (left, right, or bottom). It summarizes bounded trace context and can request built-in helper actions through the existing GUI IPC boundary.
 
 ### Bottleneck Analysis
 
-The Copilot receives the current trace context — active cycle window, event histogram, and Flame Graph summary — and returns a natural-language bottleneck diagnosis with cycle-level supporting evidence. Analysis does not require an external API connection; the local context-compression engine produces results from trace data alone.
+The assistant receives the current trace context - active cycle window, event histogram, and Flame Graph summary - and returns a bounded bottleneck note with cycle-level supporting evidence. Analysis does not require an external provider connection; the local context-compression engine produces results from trace data alone.
 
 ### UVM Sequence Generation
 
-The Copilot generates complete UVM sequence objects for five predefined optimization strategies:
+The assistant can request built-in UVM sequence objects for five predefined optimization strategies:
 
 | Strategy | Description |
 |---|---|
@@ -583,7 +583,7 @@ Connect the desktop application via **Trace > Connect to Server** with the serve
 | 3D rendering | Three.js |
 | Charts | ECharts (echarts-for-react) |
 | Graph editor | React Flow (@xyflow/react) |
-| Code editor | Monaco (VS Code engine) |
+| Code editor | Monaco editor |
 | Layout | react-resizable-panels v4 |
 
 ### Rust Workspace Crates
@@ -599,7 +599,7 @@ The backend is organized as a 10-crate Rust workspace:
 | `pccx-evolve` | Self-evolution cycle management |
 | `pccx-remote` | Network server and client for remote trace streaming |
 | `pccx-lsp` | Language server protocol integration for the SV Editor |
-| `pccx-ai-copilot` | Context compression and AI copilot backend |
+| `pccx-ai-copilot` | Context compression and assistant-facing helper scaffolds |
 | `pccx-uvm-bridge` | UVM scoreboard hooks and coverage data import |
 | `pccx-ide` | Tauri IPC command handlers (30+ `invoke_handler` commands) |
 

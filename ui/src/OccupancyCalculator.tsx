@@ -4,7 +4,7 @@ import { Cpu, AlertTriangle, CheckCircle2, RotateCcw, Play } from "lucide-react"
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const FREQ_MHZ = 300; // KV260 PL fabric @ 300 MHz
+const FREQ_MHZ = 300; // Default local analysis clock.
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -426,7 +426,7 @@ export const OccupancyCalculator = memo(function OccupancyCalculator() {
           Target Configuration
         </span>
         <div style={{ fontSize: 11, color: theme.textMuted, lineHeight: 1.6 }}>
-          For high occupancy on KV260 ZU5EV: 8x8 MAC, 128 KB activation + 128 KB weight, 8 pipeline stages, 4 DMA channels.
+          For the configured local target: 8x8 MAC, 128 KB activation + 128 KB weight, 8 pipeline stages, 4 DMA channels.
           Tune pipelineDepth down if buffer pressure is the limiter.
         </div>
       </div>
@@ -541,7 +541,7 @@ export const OccupancyCalculator = memo(function OccupancyCalculator() {
           </button>
         )}
         <span style={{ marginLeft: "auto", fontSize: 10, color: theme.textFaint }}>
-          KV260 ZU5EV @ {FREQ_MHZ} MHz
+          Configured local target @ {FREQ_MHZ} MHz
         </span>
       </div>
     </div>

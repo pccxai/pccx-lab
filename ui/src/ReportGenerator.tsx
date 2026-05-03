@@ -29,7 +29,7 @@ export function ReportGenerator() {
       <Dialog.Content style={{ maxWidth: 450, backgroundColor: "#111827", color: "#f3f4f6", border: "1px solid #374151" }}>
         <Dialog.Title>Generate Report</Dialog.Title>
         <Dialog.Description size="2" mb="4" color="gray">
-          Compile the current 32K 3D trace snapshots, node layouts, and AI Copilot analysis into a professional PDF report.
+          Compile the current 32K 3D trace snapshots, node layouts, and local workflow assistant notes into a PDF report.
         </Dialog.Description>
 
         <Flex direction="column" gap="3">
@@ -37,7 +37,7 @@ export function ReportGenerator() {
             <ul className="list-disc pl-5 text-sm text-gray-300">
               <li>High-res Instanced MAC Array Snapshots</li>
               <li>Data Flow Configuration Graph</li>
-              <li>L2 Prefetch Optimization AI Summary</li>
+              <li>L2 Prefetch Optimization Summary</li>
             </ul>
           </div>
         </Flex>
