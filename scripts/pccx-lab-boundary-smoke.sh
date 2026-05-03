@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 pccxai
 # scripts/pccx-lab-boundary-smoke.sh — verify key CLI/core boundary artifacts.
 # Does not build the project. Does not run xsim. Does not require hardware.
 # Exits 0 on success; exits 1 with diagnostics if an artifact is missing
@@ -72,6 +74,7 @@ INFO "  workflow-descriptors  (descriptor-only workflow catalog)"
 INFO "  workflow-proposals    (proposal-only workflow previews)"
 INFO "  workflow-results      (summary-only result metadata)"
 INFO "  workflow-runner       (disabled-by-default allowlisted pilot)"
+INFO "  launcher-diagnostics-handoff (read-only launcher handoff reader)"
 INFO "  trace-discovery       (headless CI path)"
 INFO "  xsim-log-handoff      (pccx-FPGA verification loop)"
 
@@ -85,6 +88,7 @@ check_file "$REPO_ROOT/docs/examples/workflow-descriptors.example.json"
 check_file "$REPO_ROOT/docs/examples/workflow-proposals.example.json"
 check_file "$REPO_ROOT/docs/examples/workflow-results.example.json"
 check_file "$REPO_ROOT/docs/examples/workflow-runner-blocked.example.json"
+check_file "$REPO_ROOT/docs/examples/launcher-diagnostics-handoff.example.json"
 
 echo
 INFO "CLI command source presence"
