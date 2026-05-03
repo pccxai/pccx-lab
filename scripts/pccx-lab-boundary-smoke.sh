@@ -6,11 +6,48 @@
 
 set -u
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEFAULT_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$DEFAULT_REPO_ROOT"
 
 INFO() { printf '[INFO]  %s\n' "$*"; }
 PASS() { printf '[PASS]  %s\n' "$*"; }
 FAIL() { printf '[FAIL]  %s\n' "$*" >&2; }
+
+usage() {
+    cat <<'USAGE'
+Usage: scripts/pccx-lab-boundary-smoke.sh [--root <repo-root>]
+
+Without --root, checks the real pccx-lab repo. The explicit --root option is
+for deterministic fixture tests; it does not run providers, hardware, browsers,
+launchers, IDE integrations, or networked services.
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --root)
+            if [ "$#" -lt 2 ]; then
+                FAIL "missing path after --root"
+                usage >&2
+                exit 2
+            fi
+            if ! REPO_ROOT="$(cd "$2" 2>/dev/null && pwd)"; then
+                FAIL "invalid --root path: $2"
+                exit 2
+            fi
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            FAIL "unknown argument: $1"
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
 
 FAILURES=0
 
@@ -69,10 +106,24 @@ echo
 INFO "JSON validity"
 for f in "$REPO_ROOT/docs/examples/"*.example.json; do
     [ -f "$f" ] || continue
-    if python3 -c "import json, sys; json.load(open(sys.argv[1]))" "$f" 2>/dev/null; then
-        PASS "valid JSON: $(basename "$f")"
+    if json_error="$(
+        python3 - "$f" <<'PY' 2>&1
+import json
+import sys
+
+path = sys.argv[1]
+
+try:
+    with open(path, encoding="utf-8") as handle:
+        json.load(handle)
+except Exception as error:
+    print(f"{type(error).__name__}: {error}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+    )"; then
+        PASS "valid JSON: $f"
     else
-        FAIL "invalid JSON: $(basename "$f")"
+        FAIL "invalid JSON: $f: $json_error"
         FAILURES=$((FAILURES + 1))
     fi
 done

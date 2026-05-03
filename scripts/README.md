@@ -11,6 +11,7 @@ to the point where `npm run tauri dev` works.
 | `run_dev.sh`                   | Launch the Tauri dev window with cargo+nvm pre-sourced.         |
 | `doctor.sh`                    | Read-only environment diagnostic.  Prints versions + fixes.     |
 | `pccx-lab-boundary-smoke.sh`   | Verify CLI/core boundary artifacts exist and JSON examples are valid. |
+| `test-boundary-smoke-fixtures.sh` | Prove boundary smoke fails clearly on malformed or missing fixture roots. |
 | `validate-local.sh`            | Run the local PR-readiness gate: Rust, frontend, static guards, and boundary smoke. |
 
 `npm run test:static` in `ui/` runs the local assistant guard against
@@ -19,6 +20,13 @@ API-key, provider-call, overclaim wording, and runtime-claim examples
 fail while safe local-only wording passes. The fixtures are inert test
 text only; they do not add provider, credential, telemetry, or runtime
 integration paths.
+
+`scripts/pccx-lab-boundary-smoke.sh` checks the real repository by default.
+Its explicit `--root <path>` option is for deterministic tests only:
+`scripts/test-boundary-smoke-fixtures.sh` stages minimal boundary roots, proves
+the positive fixture passes, and proves malformed JSON plus missing required
+boundary examples fail with file paths and short reasons. These checks do not
+add runtime, provider, MCP, launcher, IDE, network, or hardware execution.
 
 ## Typical flows
 
@@ -51,6 +59,12 @@ For an already-bootstrapped frontend loop, skip the clean npm reinstall:
 
 ```bash
 PCCX_SKIP_NPM_CI=1 bash scripts/validate-local.sh
+```
+
+**Boundary smoke fixture loop:**
+
+```bash
+bash scripts/test-boundary-smoke-fixtures.sh
 ```
 
 ## For AI agents
